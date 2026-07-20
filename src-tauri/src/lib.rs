@@ -1,3 +1,4 @@
+mod backup;
 mod commands;
 mod db;
 mod entity;
@@ -18,6 +19,9 @@ pub fn run() {
             commands::workspace_open,
             commands::workspace_current,
             commands::workspace_list_recent,
+            commands::backup_create,
+            commands::backup_list,
+            commands::backup_restore,
             commands::entity_create,
             commands::entity_update,
             commands::entity_get,

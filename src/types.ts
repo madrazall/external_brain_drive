@@ -40,3 +40,10 @@ export interface EntityContext {
   containingProjects: Entity[];
   recentEvents: TimelineEvent[];
 }
+
+export interface BackupInfo {
+  fileName: string;
+  path: string;
+  sizeBytes: number;
+  createdAt: string;
+}

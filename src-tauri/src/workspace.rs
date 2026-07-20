@@ -1,9 +1,11 @@
+use crate::backup;
 use crate::db::{open_database, set_setting, validate_connection};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+
 const WORKSPACE_DB: &str = "workspace.db";
 const WORKSPACE_MARKER: &str = "workspace.json";
 
@@ -61,18 +63,20 @@ pub fn create_workspace(state: &AppState, parent_dir: &str, name: &str) -> AppRe
     )?;
 
     {
-        let mut guard = state
-            .db
-            .lock()
-            .map_err(|_| AppError::msg("Failed to lock database state."))?;
-        *guard = Some(conn);
-    }
-    {
         let mut path_guard = state
             .workspace_path
             .lock()
             .map_err(|_| AppError::msg("Failed to lock workspace path."))?;
         *path_guard = Some(workspace_path.clone());
+    }
+    {
+        let mut guard = state
+            .db
+            .lock()
+            .map_err(|_| AppError::msg("Failed to lock database state."))?;
+        // Initial snapshot of empty workspace (best-effort).
+        let _ = backup::create_backup_from_conn(&workspace_path, &conn);
+        *guard = Some(conn);
     }
 
     remember_recent(&workspace_path)?;
@@ -110,18 +114,22 @@ pub fn open_workspace(state: &AppState, path: &str) -> AppResult<WorkspaceInfo> 
         });
 
     {
-        let mut guard = state
-            .db
-            .lock()
-            .map_err(|_| AppError::msg("Failed to lock database state."))?;
-        *guard = Some(conn);
-    }
-    {
         let mut path_guard = state
             .workspace_path
             .lock()
             .map_err(|_| AppError::msg("Failed to lock workspace path."))?;
         *path_guard = Some(workspace_path.clone());
+    }
+    {
+        let mut guard = state
+            .db
+            .lock()
+            .map_err(|_| AppError::msg("Failed to lock database state."))?;
+        // Auto-backup on every open (best-effort; never block opening).
+        if let Err(e) = backup::create_backup_from_conn(&workspace_path, &conn) {
+            eprintln!("workspace open backup failed: {e}");
+        }
+        *guard = Some(conn);
     }
 
     remember_recent(&workspace_path)?;

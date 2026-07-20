@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  BackupInfo,
   CreateEntityInput,
   Entity,
   EntityContext,
@@ -16,6 +17,12 @@ export const api = {
   workspaceCurrent: () => invoke<WorkspaceInfo | null>("workspace_current"),
 
   workspaceListRecent: () => invoke<string[]>("workspace_list_recent"),
+
+  backupCreate: () => invoke<BackupInfo>("backup_create"),
+
+  backupList: () => invoke<BackupInfo[]>("backup_list"),
+
+  backupRestore: (path: string) => invoke<BackupInfo>("backup_restore", { path }),
 
   entityCreate: (input: CreateEntityInput) =>
     invoke<Entity>("entity_create", { input }),

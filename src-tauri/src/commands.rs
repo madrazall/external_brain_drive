@@ -1,3 +1,4 @@
+use crate::backup::{self, BackupInfo};
 use crate::entity::{
     self, CreateEntityInput, Entity, EntityContext, Relationship, UpdateEntityInput,
 };
@@ -28,6 +29,22 @@ pub fn workspace_current(state: State<'_, AppState>) -> AppResult<Option<Workspa
 #[tauri::command]
 pub fn workspace_list_recent() -> AppResult<Vec<String>> {
     workspace::list_recent_workspaces()
+}
+
+#[tauri::command]
+pub fn backup_create(state: State<'_, AppState>) -> AppResult<BackupInfo> {
+    backup::create_backup(&state)
+}
+
+#[tauri::command]
+pub fn backup_list(state: State<'_, AppState>) -> AppResult<Vec<BackupInfo>> {
+    backup::list_backups(&state)
+}
+
+#[tauri::command]
+pub fn backup_restore(state: State<'_, AppState>, path: String) -> AppResult<BackupInfo> {
+    // Returns the safety backup created before restore.
+    backup::restore_backup(&state, &path)
 }
 
 #[tauri::command]

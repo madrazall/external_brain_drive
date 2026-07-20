@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import { EntityDetail } from "./EntityDetail";
-import type { Entity, EntityType, WorkspaceInfo } from "./types";
+import type { BackupInfo, Entity, EntityType, WorkspaceInfo } from "./types";
 import "./App.css";
 
-type View = "inbox" | "projects" | "search";
+type View = "inbox" | "projects" | "search" | "backups";
 
 const CAPTURE_TYPES: { value: EntityType; label: string }[] = [
   { value: "note", label: "Note" },
@@ -53,6 +53,8 @@ function App() {
   const [newWorkspaceName, setNewWorkspaceName] = useState("My Brain");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Entity[]>([]);
+  const [backups, setBackups] = useState<BackupInfo[]>([]);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const refreshLists = useCallback(async () => {
     const [all, projectList] = await Promise.all([
@@ -61,6 +63,14 @@ function App() {
     ]);
     setEntities(all);
     setProjects(projectList);
+  }, []);
+
+  const refreshBackups = useCallback(async () => {
+    try {
+      setBackups(await api.backupList());
+    } catch {
+      setBackups([]);
+    }
   }, []);
 
   const loadRecent = useCallback(async () => {
@@ -193,6 +203,51 @@ function App() {
     }
   };
 
+  const createBackupNow = async () => {
+    setError(null);
+    setStatusMessage(null);
+    setBusy(true);
+    try {
+      const info = await api.backupCreate();
+      setStatusMessage(`Backup saved: ${info.fileName}`);
+      await refreshBackups();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restoreBackup = async (backup: BackupInfo) => {
+    const ok = window.confirm(
+      `Restore from ${backup.fileName}?\n\nA safety backup of the current database will be created first. Your current data will be replaced by this snapshot.`,
+    );
+    if (!ok) return;
+
+    setError(null);
+    setStatusMessage(null);
+    setBusy(true);
+    try {
+      const safety = await api.backupRestore(backup.path);
+      setSelectedEntityId(null);
+      await refreshLists();
+      await refreshBackups();
+      setStatusMessage(
+        `Restored from ${backup.fileName}. Safety copy: ${safety.fileName}`,
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (view === "backups" && workspace) {
+      void refreshBackups();
+    }
+  }, [view, workspace, refreshBackups]);
+
   const handleEntityChanged = async () => {
     await refreshLists();
     if (searchQuery.trim()) {
@@ -322,6 +377,12 @@ function App() {
           >
             Search
           </button>
+          <button
+            className={view === "backups" ? "nav active" : "nav"}
+            onClick={() => setView("backups")}
+          >
+            Backups
+          </button>
         </nav>
         <div className="sidebar-foot">
           <p className="muted path" title={workspace.path}>
@@ -329,11 +390,20 @@ function App() {
           </p>
           <button
             className="secondary small"
+            disabled={busy}
+            onClick={() => void createBackupNow()}
+          >
+            Backup now
+          </button>
+          <button
+            className="secondary small"
             onClick={() => {
               setWorkspace(null);
               setEntities([]);
               setProjects([]);
               setSelectedEntityId(null);
+              setBackups([]);
+              setStatusMessage(null);
             }}
           >
             Switch workspace
@@ -343,6 +413,9 @@ function App() {
 
       <main className="main">
         {error && <div className="banner error">{error}</div>}
+        {statusMessage && (
+          <div className="banner success">{statusMessage}</div>
+        )}
 
         {view === "inbox" && (
           <>
@@ -524,6 +597,70 @@ function App() {
               ) : (
                 <ul className="entity-list">
                   {searchResults.map(renderEntityRow)}
+                </ul>
+              )}
+            </section>
+          </>
+        )}
+
+        {view === "backups" && (
+          <>
+            <header className="page-header">
+              <h1>Backups</h1>
+              <p>
+                Local snapshots of <code>workspace.db</code> in this workspace&apos;s
+                Backups folder. Auto-created on open; last {10} kept.
+              </p>
+            </header>
+
+            <section className="panel">
+              <div className="row">
+                <button disabled={busy} onClick={() => void createBackupNow()}>
+                  Create backup now
+                </button>
+                <button
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => void refreshBackups()}
+                >
+                  Refresh list
+                </button>
+              </div>
+              <p className="muted">
+                Restore replaces the live database. A safety backup is written
+                first so you can undo a bad restore.
+              </p>
+            </section>
+
+            <section className="panel">
+              <div className="panel-head">
+                <h2>Snapshots</h2>
+                <span className="muted">{backups.length}</span>
+              </div>
+              {backups.length === 0 ? (
+                <p className="empty">
+                  No backups yet. Open the workspace again or create one now.
+                </p>
+              ) : (
+                <ul className="backup-list">
+                  {backups.map((b) => (
+                    <li key={b.path}>
+                      <div>
+                        <strong>{b.fileName}</strong>
+                        <small className="muted">
+                          {formatWhen(b.createdAt)} ·{" "}
+                          {(b.sizeBytes / 1024).toFixed(1)} KB
+                        </small>
+                      </div>
+                      <button
+                        className="secondary small"
+                        disabled={busy}
+                        onClick={() => void restoreBackup(b)}
+                      >
+                        Restore
+                      </button>
+                    </li>
+                  ))}
                 </ul>
               )}
             </section>
