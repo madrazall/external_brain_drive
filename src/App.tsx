@@ -10,9 +10,9 @@ type View = "inbox" | "projects" | "search";
 const CAPTURE_TYPES: { value: EntityType; label: string }[] = [
   { value: "note", label: "Note" },
   { value: "task", label: "Task" },
-  { value: "project", label: "Project" },
+  { value: "project", label: "Proj" },
   { value: "person", label: "Person" },
-  { value: "inbox", label: "Inbox dump" },
+  { value: "inbox", label: "Dump" },
 ];
 
 function formatWhen(iso: string): string {
@@ -352,11 +352,16 @@ function App() {
             </header>
 
             <section className="panel capture">
-              <div className="row">
+              <div className="row capture-title-row">
                 <select
+                  className="type-select"
                   value={captureType}
                   onChange={(e) =>
                     setCaptureType(e.target.value as EntityType)
+                  }
+                  aria-label="Entity type"
+                  title={
+                    CAPTURE_TYPES.find((t) => t.value === captureType)?.label
                   }
                 >
                   {CAPTURE_TYPES.map((t) => (
@@ -366,7 +371,7 @@ function App() {
                   ))}
                 </select>
                 <input
-                  className="grow"
+                  className="title-input"
                   value={captureTitle}
                   onChange={(e) => setCaptureTitle(e.target.value)}
                   placeholder="What's on your mind?"
@@ -383,12 +388,13 @@ function App() {
                 placeholder="Optional details…"
                 rows={3}
               />
-              <div className="row">
+              <div className="row capture-actions-row">
                 <select
+                  className="project-select"
                   value={captureProjectId}
                   onChange={(e) => setCaptureProjectId(e.target.value)}
                 >
-                  <option value="">No project link</option>
+                  <option value="">No project</option>
                   {projects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.title}

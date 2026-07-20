@@ -113,6 +113,14 @@ textarea {
   border-radius: 10px;
   padding: 0.6rem 0.75rem;
   outline: none;
+  color: var(--text);
+  caret-color: var(--accent);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.85;
 }
 
 input:focus,
@@ -260,6 +268,38 @@ h2 {
 .row .grow,
 .grow {
   flex: 1;
+  min-width: 0;
+}
+
+.capture-title-row {
+  gap: 0.5rem;
+}
+
+.capture-title-row .type-select {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 5.25rem;
+  max-width: 6.5rem;
+  padding-left: 0.55rem;
+  padding-right: 1.6rem;
+}
+
+.capture-title-row .title-input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 12rem;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.capture-actions-row .project-select {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.capture-actions-row button {
+  flex: 0 0 auto;
 }
 
 .capture textarea {
