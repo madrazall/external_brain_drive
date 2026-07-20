@@ -1,5 +1,5 @@
 use crate::entity::{
-    self, CreateEntityInput, Entity, Relationship, UpdateEntityInput,
+    self, CreateEntityInput, Entity, EntityContext, Relationship, UpdateEntityInput,
 };
 use crate::error::AppResult;
 use crate::state::AppState;
@@ -86,4 +86,19 @@ pub fn project_list_entities(
     project_id: String,
 ) -> AppResult<Vec<Entity>> {
     entity::list_project_entities(&state, &project_id)
+}
+
+#[tauri::command]
+pub fn entity_context(state: State<'_, AppState>, id: String) -> AppResult<EntityContext> {
+    entity::get_entity_context(&state, &id)
+}
+
+#[tauri::command]
+pub fn entity_unlink(
+    state: State<'_, AppState>,
+    from_entity_id: String,
+    to_entity_id: String,
+    relationship_type: String,
+) -> AppResult<bool> {
+    entity::unlink_entities(&state, &from_entity_id, &to_entity_id, &relationship_type)
 }

@@ -64,6 +64,25 @@ pub struct Relationship {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineEvent {
+    pub id: String,
+    pub entity_id: Option<String>,
+    pub event_type: String,
+    pub summary: String,
+    pub payload: serde_json::Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityContext {
+    pub entity: Entity,
+    pub containing_projects: Vec<Entity>,
+    pub recent_events: Vec<TimelineEvent>,
+}
+
 fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
@@ -188,9 +207,15 @@ pub fn update_entity(state: &AppState, input: UpdateEntityInput) -> AppResult<En
             .title
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
-            .unwrap_or(existing.title);
-        let description = input.description.unwrap_or(existing.description);
-        let metadata = input.metadata.unwrap_or(existing.metadata);
+            .unwrap_or_else(|| existing.title.clone());
+        let description = input
+            .description
+            .clone()
+            .unwrap_or_else(|| existing.description.clone());
+        let metadata = input
+            .metadata
+            .clone()
+            .unwrap_or_else(|| existing.metadata.clone());
         let archived = input.archived.unwrap_or(existing.archived);
         let ts = now();
         let metadata_raw = serde_json::to_string(&metadata)?;
@@ -213,6 +238,37 @@ pub fn update_entity(state: &AppState, input: UpdateEntityInput) -> AppResult<En
                 ts,
                 if archived { 1 } else { 0 },
                 input.id
+            ],
+        )?;
+
+        let mut summary = String::from("Updated entity");
+        let mut event_type = "entity.updated";
+        if archived && !existing.archived {
+            summary = format!("Archived: {title}");
+            event_type = "entity.archived";
+        } else if !archived && existing.archived {
+            summary = format!("Restored: {title}");
+            event_type = "entity.restored";
+        } else if title != existing.title {
+            summary = format!("Renamed to: {title}");
+        } else if description != existing.description {
+            summary = "Updated description".to_string();
+        } else if metadata != existing.metadata {
+            summary = "Updated metadata".to_string();
+        }
+
+        conn.execute(
+            r#"
+            INSERT INTO timeline_events (id, entity_id, event_type, summary, payload, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            params![
+                Uuid::new_v4().to_string(),
+                input.id,
+                event_type,
+                summary,
+                serde_json::json!({ "version": existing.version + 1 }).to_string(),
+                ts
             ],
         )?;
 
@@ -407,5 +463,82 @@ pub fn list_project_entities(state: &AppState, project_id: &str) -> AppResult<Ve
             out.push(row?);
         }
         Ok(out)
+    })
+}
+
+pub fn unlink_entities(
+    state: &AppState,
+    from_entity_id: &str,
+    to_entity_id: &str,
+    relationship_type: &str,
+) -> AppResult<bool> {
+    validate_rel_type(relationship_type)?;
+    with_db(state, |conn| {
+        let changed = conn.execute(
+            r#"
+            DELETE FROM relationships
+            WHERE from_entity_id = ?1
+              AND to_entity_id = ?2
+              AND relationship_type = ?3
+            "#,
+            params![from_entity_id, to_entity_id, relationship_type],
+        )?;
+        Ok(changed > 0)
+    })
+}
+
+pub fn get_entity_context(state: &AppState, id: &str) -> AppResult<EntityContext> {
+    with_db(state, |conn| {
+        let entity = get_entity_by_id(conn, id)?;
+
+        let mut project_stmt = conn.prepare(
+            r#"
+            SELECT e.id, e.entity_type, e.title, e.description, e.metadata,
+                   e.created_at, e.updated_at, e.version, e.archived
+            FROM relationships r
+            JOIN entities e ON e.id = r.from_entity_id
+            WHERE r.to_entity_id = ?1
+              AND r.relationship_type = 'contains'
+              AND e.archived = 0
+            ORDER BY e.title COLLATE NOCASE
+            "#,
+        )?;
+        let project_rows = project_stmt.query_map(params![id], map_entity)?;
+        let mut containing_projects = Vec::new();
+        for row in project_rows {
+            containing_projects.push(row?);
+        }
+
+        let mut event_stmt = conn.prepare(
+            r#"
+            SELECT id, entity_id, event_type, summary, payload, created_at
+            FROM timeline_events
+            WHERE entity_id = ?1
+            ORDER BY created_at DESC
+            LIMIT 12
+            "#,
+        )?;
+        let event_rows = event_stmt.query_map(params![id], |row| {
+            let payload_raw: String = row.get(4)?;
+            let payload = serde_json::from_str(&payload_raw).unwrap_or(serde_json::json!({}));
+            Ok(TimelineEvent {
+                id: row.get(0)?,
+                entity_id: row.get(1)?,
+                event_type: row.get(2)?,
+                summary: row.get(3)?,
+                payload,
+                created_at: row.get(5)?,
+            })
+        })?;
+        let mut recent_events = Vec::new();
+        for row in event_rows {
+            recent_events.push(row?);
+        }
+
+        Ok(EntityContext {
+            entity,
+            containing_projects,
+            recent_events,
+        })
     })
 }

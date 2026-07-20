@@ -24,6 +24,8 @@ pub fn run() {
             commands::entity_list,
             commands::entity_search,
             commands::entity_link,
+            commands::entity_unlink,
+            commands::entity_context,
             commands::project_list_entities,
         ])
         .run(tauri::generate_context!())

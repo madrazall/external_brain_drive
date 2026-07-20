@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
+import { EntityDetail } from "./EntityDetail";
 import type { Entity, EntityType, WorkspaceInfo } from "./types";
 import "./App.css";
 
@@ -26,13 +27,20 @@ function typeBadge(type: string): string {
   return type.charAt(0).toUpperCase() + type.slice(1);
 }
 
+function isTaskDone(entity: Entity): boolean {
+  return entity.metadata?.status === "done";
+}
+
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [projects, setProjects] = useState<Entity[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    null,
+  );
   const [projectEntities, setProjectEntities] = useState<Entity[]>([]);
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [view, setView] = useState<View>("inbox");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -111,6 +119,7 @@ function App() {
       }
       const info = await api.workspaceOpen(target);
       setWorkspace(info);
+      setSelectedEntityId(null);
       setView("inbox");
       await refreshLists();
       await loadRecent();
@@ -136,6 +145,7 @@ function App() {
       }
       const info = await api.workspaceCreate(parent, newWorkspaceName);
       setWorkspace(info);
+      setSelectedEntityId(null);
       setView("inbox");
       await refreshLists();
       await loadRecent();
@@ -154,7 +164,7 @@ function App() {
     setError(null);
     setBusy(true);
     try {
-      await api.entityCreate({
+      const created = await api.entityCreate({
         entityType: captureType,
         title: captureTitle.trim(),
         description: captureBody.trim(),
@@ -163,6 +173,7 @@ function App() {
       setCaptureTitle("");
       setCaptureBody("");
       await refreshLists();
+      setSelectedEntityId(created.id);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -182,10 +193,47 @@ function App() {
     }
   };
 
+  const handleEntityChanged = async () => {
+    await refreshLists();
+    if (searchQuery.trim()) {
+      try {
+        setSearchResults(await api.entitySearch(searchQuery));
+      } catch {
+        // ignore refresh search errors
+      }
+    }
+  };
+
   const inboxItems = useMemo(
     () => entities.filter((e) => e.entityType !== "project"),
     [entities],
   );
+
+  const renderEntityRow = (e: Entity) => {
+    const done = e.entityType === "task" && isTaskDone(e);
+    return (
+      <li key={e.id}>
+        <button
+          type="button"
+          className={
+            selectedEntityId === e.id
+              ? "entity-row selected"
+              : "entity-row"
+          }
+          onClick={() => setSelectedEntityId(e.id)}
+        >
+          <span className={`badge type-${e.entityType}`}>
+            {typeBadge(e.entityType)}
+          </span>
+          <div className="entity-row-body">
+            <strong className={done ? "done" : undefined}>{e.title}</strong>
+            {e.description && <p>{e.description}</p>}
+            <small className="muted">{formatWhen(e.updatedAt)}</small>
+          </div>
+        </button>
+      </li>
+    );
+  };
 
   if (!workspace) {
     return (
@@ -249,7 +297,7 @@ function App() {
   }
 
   return (
-    <div className="shell app">
+    <div className={selectedEntityId ? "shell app with-detail" : "shell app"}>
       <aside className="sidebar">
         <div className="brand">
           <strong>External Brain Drive</strong>
@@ -285,6 +333,7 @@ function App() {
               setWorkspace(null);
               setEntities([]);
               setProjects([]);
+              setSelectedEntityId(null);
             }}
           >
             Switch workspace
@@ -299,7 +348,7 @@ function App() {
           <>
             <header className="page-header">
               <h1>Capture</h1>
-              <p>Dump first. Organize later. Everything is an entity.</p>
+              <p>Dump first. Organize later. Click any item to open details.</p>
             </header>
 
             <section className="panel capture">
@@ -361,20 +410,7 @@ function App() {
                 <p className="empty">Nothing captured yet. Start above.</p>
               ) : (
                 <ul className="entity-list">
-                  {inboxItems.map((e) => (
-                    <li key={e.id}>
-                      <span className={`badge type-${e.entityType}`}>
-                        {typeBadge(e.entityType)}
-                      </span>
-                      <div>
-                        <strong>{e.title}</strong>
-                        {e.description && <p>{e.description}</p>}
-                        <small className="muted">
-                          {formatWhen(e.updatedAt)}
-                        </small>
-                      </div>
-                    </li>
-                  ))}
+                  {inboxItems.map(renderEntityRow)}
                 </ul>
               )}
             </section>
@@ -399,16 +435,25 @@ function App() {
                   <ul className="entity-list compact">
                     {projects.map((p) => (
                       <li key={p.id}>
-                        <button
-                          className={
-                            selectedProjectId === p.id
-                              ? "linkish active"
-                              : "linkish"
-                          }
-                          onClick={() => setSelectedProjectId(p.id)}
-                        >
-                          {p.title}
-                        </button>
+                        <div className="project-pick">
+                          <button
+                            className={
+                              selectedProjectId === p.id
+                                ? "linkish active"
+                                : "linkish"
+                            }
+                            onClick={() => setSelectedProjectId(p.id)}
+                          >
+                            {p.title}
+                          </button>
+                          <button
+                            className="secondary small"
+                            type="button"
+                            onClick={() => setSelectedEntityId(p.id)}
+                          >
+                            Edit
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -426,21 +471,12 @@ function App() {
                   <p className="empty">Choose a project to see linked items.</p>
                 ) : projectEntities.length === 0 ? (
                   <p className="empty">
-                    No linked items yet. Capture with this project selected.
+                    No linked items yet. Capture with this project selected, or
+                    link from the detail panel.
                   </p>
                 ) : (
                   <ul className="entity-list">
-                    {projectEntities.map((e) => (
-                      <li key={e.id}>
-                        <span className={`badge type-${e.entityType}`}>
-                          {typeBadge(e.entityType)}
-                        </span>
-                        <div>
-                          <strong>{e.title}</strong>
-                          {e.description && <p>{e.description}</p>}
-                        </div>
-                      </li>
-                    ))}
+                    {projectEntities.map(renderEntityRow)}
                   </ul>
                 )}
               </section>
@@ -481,23 +517,23 @@ function App() {
                 <p className="empty">No results yet.</p>
               ) : (
                 <ul className="entity-list">
-                  {searchResults.map((e) => (
-                    <li key={e.id}>
-                      <span className={`badge type-${e.entityType}`}>
-                        {typeBadge(e.entityType)}
-                      </span>
-                      <div>
-                        <strong>{e.title}</strong>
-                        {e.description && <p>{e.description}</p>}
-                      </div>
-                    </li>
-                  ))}
+                  {searchResults.map(renderEntityRow)}
                 </ul>
               )}
             </section>
           </>
         )}
       </main>
+
+      {selectedEntityId && (
+        <EntityDetail
+          entityId={selectedEntityId}
+          projects={projects}
+          onClose={() => setSelectedEntityId(null)}
+          onChanged={() => void handleEntityChanged()}
+          onError={(message) => setError(message)}
+        />
+      )}
     </div>
   );
 }
