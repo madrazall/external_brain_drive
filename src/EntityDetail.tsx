@@ -93,6 +93,21 @@ export function EntityDetail({
     }
   };
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        if (dirty) void save();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityId, title, description, dirty]);
+
   const setArchived = async (archived: boolean) => {
     if (!entity) return;
     setBusy(true);
@@ -213,7 +228,11 @@ export function EntityDetail({
 
           <div className="detail-actions">
             <button disabled={busy || !dirty} onClick={() => void save()}>
-              {savedFlash ? "Saved" : dirty ? "Save changes" : "Saved"}
+              {savedFlash
+                ? "Saved"
+                : dirty
+                  ? "Save changes (Ctrl+S)"
+                  : "Saved"}
             </button>
             {entity.entityType === "task" && (
               <button

@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import { EntityDetail } from "./EntityDetail";
 import type { BackupInfo, Entity, EntityType, WorkspaceInfo } from "./types";
 import "./App.css";
 
-type View = "inbox" | "projects" | "search" | "backups";
+type View = "focus" | "inbox" | "projects" | "search" | "backups";
 
 const CAPTURE_TYPES: { value: EntityType; label: string }[] = [
   { value: "note", label: "Note" },
@@ -15,9 +21,35 @@ const CAPTURE_TYPES: { value: EntityType; label: string }[] = [
   { value: "inbox", label: "Dump" },
 ];
 
+const FILTER_CHIPS: { value: "all" | EntityType; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "note", label: "Notes" },
+  { value: "task", label: "Tasks" },
+  { value: "person", label: "People" },
+  { value: "inbox", label: "Dumps" },
+  { value: "project", label: "Projects" },
+];
+
 function formatWhen(iso: string): string {
   try {
     return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function formatRelative(iso: string): string {
+  try {
+    const then = new Date(iso).getTime();
+    const diff = Date.now() - then;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 14) return `${days}d ago`;
+    return new Date(iso).toLocaleDateString();
   } catch {
     return iso;
   }
@@ -41,9 +73,10 @@ function App() {
   );
   const [projectEntities, setProjectEntities] = useState<Entity[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
-  const [view, setView] = useState<View>("inbox");
+  const [view, setView] = useState<View>("focus");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [inboxFilter, setInboxFilter] = useState<"all" | EntityType>("all");
 
   const [captureTitle, setCaptureTitle] = useState("");
   const [captureType, setCaptureType] = useState<EntityType>("note");
@@ -55,6 +88,8 @@ function App() {
   const [searchResults, setSearchResults] = useState<Entity[]>([]);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   const refreshLists = useCallback(async () => {
     const [all, projectList] = await Promise.all([
@@ -80,6 +115,16 @@ function App() {
       setRecent([]);
     }
   }, []);
+
+  const showStatus = useCallback((message: string) => {
+    setStatusMessage(message);
+  }, []);
+
+  useEffect(() => {
+    if (!statusMessage) return;
+    const t = window.setTimeout(() => setStatusMessage(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [statusMessage]);
 
   useEffect(() => {
     void (async () => {
@@ -110,6 +155,42 @@ function App() {
     })();
   }, [selectedProjectId, workspace, entities]);
 
+  useEffect(() => {
+    if (view === "backups" && workspace) {
+      void refreshBackups();
+    }
+  }, [view, workspace, refreshBackups]);
+
+  // Escape closes detail panel
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && selectedEntityId) {
+        setSelectedEntityId(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedEntityId]);
+
+  // Focus capture field when entering capture-related views
+  useEffect(() => {
+    if (workspace && (view === "focus" || view === "inbox")) {
+      const t = window.setTimeout(() => titleInputRef.current?.focus(), 50);
+      return () => window.clearTimeout(t);
+    }
+  }, [workspace, view]);
+
+  const enterWorkspace = async (
+    info: WorkspaceInfo,
+    nextView: View = "focus",
+  ) => {
+    setWorkspace(info);
+    setSelectedEntityId(null);
+    setView(nextView);
+    await refreshLists();
+    await loadRecent();
+  };
+
   const openExisting = async (path?: string) => {
     setError(null);
     setBusy(true);
@@ -128,11 +209,7 @@ function App() {
         target = picked;
       }
       const info = await api.workspaceOpen(target);
-      setWorkspace(info);
-      setSelectedEntityId(null);
-      setView("inbox");
-      await refreshLists();
-      await loadRecent();
+      await enterWorkspace(info);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -154,11 +231,7 @@ function App() {
         return;
       }
       const info = await api.workspaceCreate(parent, newWorkspaceName);
-      setWorkspace(info);
-      setSelectedEntityId(null);
-      setView("inbox");
-      await refreshLists();
-      await loadRecent();
+      await enterWorkspace(info);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -169,6 +242,7 @@ function App() {
   const capture = async () => {
     if (!captureTitle.trim()) {
       setError("Title is required.");
+      titleInputRef.current?.focus();
       return;
     }
     setError(null);
@@ -184,6 +258,8 @@ function App() {
       setCaptureBody("");
       await refreshLists();
       setSelectedEntityId(created.id);
+      showStatus(`Captured ${typeBadge(created.entityType)}: ${created.title}`);
+      window.setTimeout(() => titleInputRef.current?.focus(), 30);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -205,11 +281,10 @@ function App() {
 
   const createBackupNow = async () => {
     setError(null);
-    setStatusMessage(null);
     setBusy(true);
     try {
       const info = await api.backupCreate();
-      setStatusMessage(`Backup saved: ${info.fileName}`);
+      showStatus(`Backup saved: ${info.fileName}`);
       await refreshBackups();
     } catch (e) {
       setError(String(e));
@@ -225,14 +300,13 @@ function App() {
     if (!ok) return;
 
     setError(null);
-    setStatusMessage(null);
     setBusy(true);
     try {
       const safety = await api.backupRestore(backup.path);
       setSelectedEntityId(null);
       await refreshLists();
       await refreshBackups();
-      setStatusMessage(
+      showStatus(
         `Restored from ${backup.fileName}. Safety copy: ${safety.fileName}`,
       );
     } catch (e) {
@@ -242,11 +316,24 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    if (view === "backups" && workspace) {
-      void refreshBackups();
+  const toggleTaskDone = async (entity: Entity, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (entity.entityType !== "task") return;
+    setBusy(true);
+    try {
+      const next = isTaskDone(entity) ? "open" : "done";
+      await api.entityUpdate({
+        id: entity.id,
+        metadata: { ...entity.metadata, status: next },
+      });
+      await refreshLists();
+      showStatus(next === "done" ? `Done: ${entity.title}` : `Reopened: ${entity.title}`);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
     }
-  }, [view, workspace, refreshBackups]);
+  };
 
   const handleEntityChanged = async () => {
     await refreshLists();
@@ -254,41 +341,158 @@ function App() {
       try {
         setSearchResults(await api.entitySearch(searchQuery));
       } catch {
-        // ignore refresh search errors
+        // ignore
       }
     }
   };
 
-  const inboxItems = useMemo(
-    () => entities.filter((e) => e.entityType !== "project"),
+  const openTasks = useMemo(
+    () =>
+      entities.filter((e) => e.entityType === "task" && !isTaskDone(e)),
     [entities],
   );
 
-  const renderEntityRow = (e: Entity) => {
+  const recentlyTouched = useMemo(() => {
+    return [...entities]
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      )
+      .slice(0, 12);
+  }, [entities]);
+
+  const inboxItems = useMemo(() => {
+    let list = entities;
+    if (inboxFilter === "all") {
+      list = entities.filter((e) => e.entityType !== "project");
+    } else {
+      list = entities.filter((e) => e.entityType === inboxFilter);
+    }
+    return list;
+  }, [entities, inboxFilter]);
+
+  const stats = useMemo(() => {
+    const notes = entities.filter((e) => e.entityType === "note").length;
+    const tasksOpen = openTasks.length;
+    const tasksDone = entities.filter(
+      (e) => e.entityType === "task" && isTaskDone(e),
+    ).length;
+    return {
+      total: entities.length,
+      notes,
+      tasksOpen,
+      tasksDone,
+      projects: projects.length,
+    };
+  }, [entities, openTasks.length, projects.length]);
+
+  const renderEntityRow = (e: Entity, opts?: { showToggle?: boolean }) => {
     const done = e.entityType === "task" && isTaskDone(e);
     return (
       <li key={e.id}>
-        <button
-          type="button"
+        <div
           className={
             selectedEntityId === e.id
-              ? "entity-row selected"
-              : "entity-row"
+              ? "entity-row-wrap selected"
+              : "entity-row-wrap"
           }
-          onClick={() => setSelectedEntityId(e.id)}
         >
-          <span className={`badge type-${e.entityType}`}>
-            {typeBadge(e.entityType)}
-          </span>
-          <div className="entity-row-body">
-            <strong className={done ? "done" : undefined}>{e.title}</strong>
-            {e.description && <p>{e.description}</p>}
-            <small className="muted">{formatWhen(e.updatedAt)}</small>
-          </div>
-        </button>
+          {opts?.showToggle && e.entityType === "task" && (
+            <button
+              type="button"
+              className={done ? "task-check checked" : "task-check"}
+              title={done ? "Mark open" : "Mark done"}
+              disabled={busy}
+              onClick={(ev) => void toggleTaskDone(e, ev)}
+              aria-label={done ? "Mark open" : "Mark done"}
+            >
+              {done ? "✓" : ""}
+            </button>
+          )}
+          <button
+            type="button"
+            className={
+              selectedEntityId === e.id
+                ? "entity-row selected"
+                : "entity-row"
+            }
+            onClick={() => setSelectedEntityId(e.id)}
+          >
+            <span className={`badge type-${e.entityType}`}>
+              {typeBadge(e.entityType)}
+            </span>
+            <div className="entity-row-body">
+              <strong className={done ? "done" : undefined}>{e.title}</strong>
+              {e.description && <p>{e.description}</p>}
+              <small className="muted">{formatRelative(e.updatedAt)}</small>
+            </div>
+          </button>
+        </div>
       </li>
     );
   };
+
+  const capturePanel = (
+    <section className="panel capture">
+      <div className="row capture-title-row">
+        <select
+          className="type-select"
+          value={captureType}
+          onChange={(e) => setCaptureType(e.target.value as EntityType)}
+          aria-label="Entity type"
+          title={CAPTURE_TYPES.find((t) => t.value === captureType)?.label}
+        >
+          {CAPTURE_TYPES.map((t) => (
+            <option key={t.value} value={t.value}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+        <input
+          ref={titleInputRef}
+          className="title-input"
+          value={captureTitle}
+          onChange={(e) => setCaptureTitle(e.target.value)}
+          placeholder="What's on your mind? (Enter to capture)"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void capture();
+            }
+          }}
+        />
+      </div>
+      <textarea
+        value={captureBody}
+        onChange={(e) => setCaptureBody(e.target.value)}
+        placeholder="Optional details… (Shift+Enter for newline in title is n/a; use this field)"
+        rows={2}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            void capture();
+          }
+        }}
+      />
+      <div className="row capture-actions-row">
+        <select
+          className="project-select"
+          value={captureProjectId}
+          onChange={(e) => setCaptureProjectId(e.target.value)}
+        >
+          <option value="">No project</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.title}
+            </option>
+          ))}
+        </select>
+        <button disabled={busy} onClick={() => void capture()}>
+          Capture
+        </button>
+      </div>
+    </section>
+  );
 
   if (!workspace) {
     return (
@@ -311,6 +515,9 @@ function App() {
                 value={newWorkspaceName}
                 onChange={(e) => setNewWorkspaceName(e.target.value)}
                 placeholder="My Brain"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void createWorkspace();
+                }}
               />
             </label>
             <button disabled={busy} onClick={() => void createWorkspace()}>
@@ -360,10 +567,16 @@ function App() {
         </div>
         <nav>
           <button
+            className={view === "focus" ? "nav active" : "nav"}
+            onClick={() => setView("focus")}
+          >
+            Daily Focus
+          </button>
+          <button
             className={view === "inbox" ? "nav active" : "nav"}
             onClick={() => setView("inbox")}
           >
-            Inbox / Capture
+            Capture
           </button>
           <button
             className={view === "projects" ? "nav active" : "nav"}
@@ -384,6 +597,10 @@ function App() {
             Backups
           </button>
         </nav>
+        <div className="sidebar-stats muted">
+          <span>{stats.tasksOpen} open tasks</span>
+          <span>{stats.total} entities</span>
+        </div>
         <div className="sidebar-foot">
           <p className="muted path" title={workspace.path}>
             {workspace.path}
@@ -404,6 +621,7 @@ function App() {
               setSelectedEntityId(null);
               setBackups([]);
               setStatusMessage(null);
+              setView("focus");
             }}
           >
             Switch workspace
@@ -417,79 +635,99 @@ function App() {
           <div className="banner success">{statusMessage}</div>
         )}
 
+        {view === "focus" && (
+          <>
+            <header className="page-header">
+              <h1>Daily Focus</h1>
+              <p>
+                Open tasks and what you touched recently. Capture below — press{" "}
+                <kbd>Enter</kbd> to save.
+              </p>
+            </header>
+
+            {capturePanel}
+
+            <div className="split focus-split">
+              <section className="panel">
+                <div className="panel-head">
+                  <h2>Open tasks</h2>
+                  <span className="muted">{openTasks.length}</span>
+                </div>
+                {openTasks.length === 0 ? (
+                  <p className="empty">
+                    No open tasks. Capture type <strong>Task</strong> to add
+                    one.
+                  </p>
+                ) : (
+                  <ul className="entity-list">
+                    {openTasks.map((e) =>
+                      renderEntityRow(e, { showToggle: true }),
+                    )}
+                  </ul>
+                )}
+              </section>
+
+              <section className="panel">
+                <div className="panel-head">
+                  <h2>Recently touched</h2>
+                  <span className="muted">{recentlyTouched.length}</span>
+                </div>
+                {recentlyTouched.length === 0 ? (
+                  <p className="empty">Nothing yet — capture something.</p>
+                ) : (
+                  <ul className="entity-list">
+                    {recentlyTouched.map((e) =>
+                      renderEntityRow(e, { showToggle: e.entityType === "task" }),
+                    )}
+                  </ul>
+                )}
+              </section>
+            </div>
+          </>
+        )}
+
         {view === "inbox" && (
           <>
             <header className="page-header">
               <h1>Capture</h1>
-              <p>Dump first. Organize later. Click any item to open details.</p>
+              <p>
+                Dump first. Organize later. <kbd>Enter</kbd> captures ·{" "}
+                <kbd>Esc</kbd> closes detail.
+              </p>
             </header>
 
-            <section className="panel capture">
-              <div className="row capture-title-row">
-                <select
-                  className="type-select"
-                  value={captureType}
-                  onChange={(e) =>
-                    setCaptureType(e.target.value as EntityType)
-                  }
-                  aria-label="Entity type"
-                  title={
-                    CAPTURE_TYPES.find((t) => t.value === captureType)?.label
-                  }
-                >
-                  {CAPTURE_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className="title-input"
-                  value={captureTitle}
-                  onChange={(e) => setCaptureTitle(e.target.value)}
-                  placeholder="What's on your mind?"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                      void capture();
-                    }
-                  }}
-                />
-              </div>
-              <textarea
-                value={captureBody}
-                onChange={(e) => setCaptureBody(e.target.value)}
-                placeholder="Optional details…"
-                rows={3}
-              />
-              <div className="row capture-actions-row">
-                <select
-                  className="project-select"
-                  value={captureProjectId}
-                  onChange={(e) => setCaptureProjectId(e.target.value)}
-                >
-                  <option value="">No project</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.title}
-                    </option>
-                  ))}
-                </select>
-                <button disabled={busy} onClick={() => void capture()}>
-                  Capture
-                </button>
-              </div>
-            </section>
+            {capturePanel}
 
             <section className="panel">
               <div className="panel-head">
-                <h2>Recent entities</h2>
-                <span className="muted">{inboxItems.length} items</span>
+                <h2>Entities</h2>
+                <span className="muted">{inboxItems.length}</span>
+              </div>
+              <div className="chip-row">
+                {FILTER_CHIPS.map((chip) => (
+                  <button
+                    key={chip.value}
+                    type="button"
+                    className={
+                      inboxFilter === chip.value
+                        ? "chip active"
+                        : "chip"
+                    }
+                    onClick={() => setInboxFilter(chip.value)}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
               </div>
               {inboxItems.length === 0 ? (
-                <p className="empty">Nothing captured yet. Start above.</p>
+                <p className="empty">Nothing in this filter yet.</p>
               ) : (
                 <ul className="entity-list">
-                  {inboxItems.map(renderEntityRow)}
+                  {inboxItems.map((e) =>
+                    renderEntityRow(e, {
+                      showToggle: e.entityType === "task",
+                    }),
+                  )}
                 </ul>
               )}
             </section>
@@ -508,7 +746,7 @@ function App() {
                 <h2>All projects</h2>
                 {projects.length === 0 ? (
                   <p className="empty">
-                    Capture a project from the Inbox view first.
+                    Capture a project (type Proj) from Focus or Capture.
                   </p>
                 ) : (
                   <ul className="entity-list compact">
@@ -550,12 +788,16 @@ function App() {
                   <p className="empty">Choose a project to see linked items.</p>
                 ) : projectEntities.length === 0 ? (
                   <p className="empty">
-                    No linked items yet. Capture with this project selected, or
+                    No linked items yet. Capture with a project selected, or
                     link from the detail panel.
                   </p>
                 ) : (
                   <ul className="entity-list">
-                    {projectEntities.map(renderEntityRow)}
+                    {projectEntities.map((e) =>
+                      renderEntityRow(e, {
+                        showToggle: e.entityType === "task",
+                      }),
+                    )}
                   </ul>
                 )}
               </section>
@@ -577,6 +819,7 @@ function App() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search your brain…"
+                  autoFocus
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void runSearch();
                   }}
@@ -596,7 +839,11 @@ function App() {
                 <p className="empty">No results yet.</p>
               ) : (
                 <ul className="entity-list">
-                  {searchResults.map(renderEntityRow)}
+                  {searchResults.map((e) =>
+                    renderEntityRow(e, {
+                      showToggle: e.entityType === "task",
+                    }),
+                  )}
                 </ul>
               )}
             </section>
@@ -608,8 +855,9 @@ function App() {
             <header className="page-header">
               <h1>Backups</h1>
               <p>
-                Local snapshots of <code>workspace.db</code> in this workspace&apos;s
-                Backups folder. Auto-created on open; last {10} kept.
+                Local snapshots of <code>workspace.db</code> in this
+                workspace&apos;s Backups folder. Auto-created on open; last 10
+                kept.
               </p>
             </header>
 

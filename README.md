@@ -4,20 +4,27 @@ Local-first personal operating system for knowledge work.
 
 > Software that remembers everything so you don't have to.
 
-This is the v0.1 vertical slice:
+## v0.1 — core complete
 
-- Create / open a **local workspace** (`workspace.db` + folders)
-- Capture **entities** (note, task, project, person, inbox)
-- Link items into **projects** via relationships
-- **Full-text search** with SQLite FTS5
-- Everything offline, on your machine
+| Feature | Status |
+|---------|--------|
+| Local workspace create / open | ✅ |
+| Entity engine (note, task, project, person, inbox) | ✅ |
+| Capture + detail edit / archive | ✅ |
+| Project relationships | ✅ |
+| Full-text search (SQLite FTS5) | ✅ |
+| Daily Focus (open tasks + recent) | ✅ |
+| Workspace backups + restore | ✅ |
+| Offline-first desktop app | ✅ |
+
+**Not in v0.1** (later phases): AI, OCR, plugins, sync, multi-user.
 
 ## Stack
 
 | Layer | Tech |
 |-------|------|
 | Desktop shell | Tauri 2 |
-| Backend | Rust + SQLite (WAL, FTS5) |
+| Backend | Rust + SQLite (WAL, FTS5, online backup) |
 | Frontend | React + TypeScript + Vite |
 
 ## Workspace layout
@@ -28,7 +35,7 @@ MyBrain/
   workspace.json
   Documents/
   Attachments/
-  Backups/
+  Backups/          # auto snapshots (last 10)
   Cache/
   Settings/
   Plugins/
@@ -36,7 +43,7 @@ MyBrain/
 
 ## Develop
 
-Prerequisites: Node 20+, Rust stable, platform deps for [Tauri 2](https://v2.tauri.app/start/prerequisites/).
+Prerequisites: Node 20+, Rust stable, [Tauri 2 platform deps](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
 npm install
@@ -49,27 +56,40 @@ Build:
 npm run tauri build
 ```
 
-## Architecture (v0.1)
+## How to use (v0.1)
+
+1. **Create** or **open** a workspace folder  
+2. Land on **Daily Focus** — open tasks + recently touched  
+3. **Capture** with type + title, press **Enter**  
+4. Click any item → edit, archive, link to a project, mark tasks done  
+5. **Search** by keyword  
+6. **Backups** auto-run on open; restore anytime  
+
+Keyboard:
+
+- `Enter` — capture (title field)  
+- `Ctrl/Cmd+S` — save detail  
+- `Esc` — close detail panel  
+
+## Architecture
 
 ```
 UI (React)
   → Tauri commands
-    → Entity Engine
+    → Entity Engine + Backup service
       → SQLite workspace
       → Filesystem folders
 ```
 
 All product objects go through the entity engine — not ad-hoc tables per feature.
 
-## Roadmap alignment
+## Roadmap
 
-Specs live in `_PROJECTS/TBD` (vision, PRD, architecture, etc.).
-
-Build phases:
-
-1. **Core** (this repo) — workspace, entities, search, capture loop  
+1. **Core** (this release) — workspace, entities, focus, search, backups  
 2. **AI** — provider abstraction, assistive summaries  
 3. **Plugins / collab** — extensible entity types, optional encrypted sync  
+
+Product specs: `_PROJECTS/TBD`.
 
 ## License
 
