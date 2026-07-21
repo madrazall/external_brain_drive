@@ -47,3 +47,15 @@ export interface BackupInfo {
   sizeBytes: number;
   createdAt: string;
 }
+
+export interface LinkBadge {
+  kind: string;
+  label: string;
+  id: string;
+  direction: "parent" | "child" | string;
+}
+
+export interface EntityBadges {
+  entityId: string;
+  badges: LinkBadge[];
+}

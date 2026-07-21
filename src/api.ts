@@ -3,6 +3,7 @@ import type {
   BackupInfo,
   CreateEntityInput,
   Entity,
+  EntityBadges,
   EntityContext,
   WorkspaceInfo,
 } from "./types";
@@ -30,6 +31,8 @@ export const api = {
   entityGet: (id: string) => invoke<Entity>("entity_get", { id }),
 
   entityContext: (id: string) => invoke<EntityContext>("entity_context", { id }),
+
+  entityBadges: () => invoke<EntityBadges[]>("entity_badges"),
 
   entityList: (entityType?: string, limit = 100) =>
     invoke<Entity[]>("entity_list", {

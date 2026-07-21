@@ -16,7 +16,13 @@ import {
   withContactMeta,
   type ContactInfo,
 } from "./labels";
-import type { BackupInfo, Entity, EntityType, WorkspaceInfo } from "./types";
+import type {
+  BackupInfo,
+  Entity,
+  EntityType,
+  LinkBadge,
+  WorkspaceInfo,
+} from "./types";
 import "./App.css";
 
 type View = "home" | "projects" | "people" | "search" | "backups";
@@ -78,6 +84,7 @@ function App() {
   const [searchResults, setSearchResults] = useState<Entity[]>([]);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [badgeMap, setBadgeMap] = useState<Record<string, LinkBadge[]>>({});
 
   const [contactName, setContactName] = useState("");
   const [contactForm, setContactForm] = useState<ContactInfo>(emptyContactForm());
@@ -89,14 +96,20 @@ function App() {
   const quickRef = useRef<HTMLInputElement>(null);
 
   const refreshLists = useCallback(async () => {
-    const [all, projectList, peopleList] = await Promise.all([
+    const [all, projectList, peopleList, badges] = await Promise.all([
       api.entityList(undefined, 400),
       api.entityList("project", 100),
       api.entityList("person", 300),
+      api.entityBadges().catch(() => []),
     ]);
     setEntities(all);
     setProjects(projectList);
     setPeople(peopleList);
+    const map: Record<string, LinkBadge[]> = {};
+    for (const row of badges) {
+      map[row.entityId] = row.badges;
+    }
+    setBadgeMap(map);
   }, []);
 
   const refreshBackups = useCallback(async () => {
@@ -486,6 +499,29 @@ function App() {
     });
   }, [people, contactSearch]);
 
+  const renderLinkBadges = (entityId: string) => {
+    const badges = badgeMap[entityId];
+    if (!badges?.length) return null;
+    return (
+      <div className="link-badges" aria-label="Related items">
+        {badges.map((b) => (
+          <span
+            key={`${b.direction}-${b.id}`}
+            className={`link-badge kind-${b.kind} dir-${b.direction}`}
+            title={
+              b.direction === "parent"
+                ? `In ${typeLabel(b.kind).toLowerCase()}: ${b.label}`
+                : `Has ${typeLabel(b.kind).toLowerCase()}: ${b.label}`
+            }
+          >
+            <em>{typeLabel(b.kind)}</em>
+            {b.label}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
   const renderRow = (e: Entity, opts?: { showToggle?: boolean }) => {
     const done = e.entityType === "task" && isTaskDone(e);
     return (
@@ -521,6 +557,7 @@ function App() {
             <div className="entity-row-body">
               <strong className={done ? "done" : undefined}>{e.title}</strong>
               {e.description && <p>{e.description}</p>}
+              {renderLinkBadges(e.id)}
               <small className="muted">{formatRelative(e.updatedAt)}</small>
             </div>
           </button>
@@ -738,6 +775,7 @@ function App() {
                           onClick={() => setSelectedEntityId(t.id)}
                         >
                           <span>{t.title}</span>
+                          {renderLinkBadges(t.id)}
                           <small className="muted">
                             {formatRelative(t.updatedAt)}
                           </small>

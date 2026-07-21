@@ -1,6 +1,7 @@
 use crate::backup::{self, BackupInfo};
 use crate::entity::{
-    self, CreateEntityInput, Entity, EntityContext, Relationship, UpdateEntityInput,
+    self, CreateEntityInput, Entity, EntityBadges, EntityContext, Relationship,
+    UpdateEntityInput,
 };
 use crate::error::AppResult;
 use crate::state::AppState;
@@ -108,6 +109,11 @@ pub fn project_list_entities(
 #[tauri::command]
 pub fn entity_context(state: State<'_, AppState>, id: String) -> AppResult<EntityContext> {
     entity::get_entity_context(&state, &id)
+}
+
+#[tauri::command]
+pub fn entity_badges(state: State<'_, AppState>) -> AppResult<Vec<EntityBadges>> {
+    entity::list_entity_badges(&state)
 }
 
 #[tauri::command]

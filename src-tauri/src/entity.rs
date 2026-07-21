@@ -84,6 +84,25 @@ pub struct EntityContext {
     pub recent_events: Vec<TimelineEvent>,
 }
 
+/// Compact related-item chip for list UIs (home screen, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkBadge {
+    /// Entity type of the related item: project | person | task | note | inbox
+    pub kind: String,
+    pub label: String,
+    pub id: String,
+    /// "parent" = project this sits in; "child" = item this owns/contains
+    pub direction: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityBadges {
+    pub entity_id: String,
+    pub badges: Vec<LinkBadge>,
+}
+
 fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
@@ -554,4 +573,120 @@ pub fn get_entity_context(state: &AppState, id: &str) -> AppResult<EntityContext
             recent_events,
         })
     })
+}
+
+/// Build glanceable link badges for every entity that has relationships.
+pub fn list_entity_badges(state: &AppState) -> AppResult<Vec<EntityBadges>> {
+    with_db(state, |conn| {
+        use std::collections::HashMap;
+
+        let mut by_entity: HashMap<String, Vec<LinkBadge>> = HashMap::new();
+
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+                parent.id, parent.entity_type, parent.title,
+                child.id, child.entity_type, child.title
+            FROM relationships r
+            JOIN entities parent ON parent.id = r.from_entity_id AND parent.archived = 0
+            JOIN entities child ON child.id = r.to_entity_id AND child.archived = 0
+            WHERE r.relationship_type = 'contains'
+            ORDER BY parent.title COLLATE NOCASE, child.title COLLATE NOCASE
+            "#,
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+
+        for row in rows {
+            let (parent_id, parent_type, parent_title, child_id, child_type, child_title) =
+                row?;
+
+            by_entity
+                .entry(child_id.clone())
+                .or_default()
+                .push(LinkBadge {
+                    kind: parent_type,
+                    label: parent_title,
+                    id: parent_id.clone(),
+                    direction: "parent".into(),
+                });
+
+            by_entity.entry(parent_id).or_default().push(LinkBadge {
+                kind: child_type,
+                label: child_title,
+                id: child_id,
+                direction: "child".into(),
+            });
+        }
+
+        let mut out = Vec::new();
+        for (entity_id, badges) in by_entity {
+            let compacted = compact_badges(badges);
+            if !compacted.is_empty() {
+                out.push(EntityBadges {
+                    entity_id,
+                    badges: compacted,
+                });
+            }
+        }
+        out.sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
+        Ok(out)
+    })
+}
+
+fn compact_badges(badges: Vec<LinkBadge>) -> Vec<LinkBadge> {
+    let mut parents: Vec<LinkBadge> = Vec::new();
+    let mut children_by_kind: std::collections::BTreeMap<String, Vec<LinkBadge>> =
+        std::collections::BTreeMap::new();
+
+    for b in badges {
+        if b.direction == "parent" {
+            // Deduplicate parent projects
+            if !parents.iter().any(|p| p.id == b.id) {
+                parents.push(b);
+            }
+        } else {
+            children_by_kind.entry(b.kind.clone()).or_default().push(b);
+        }
+    }
+
+    let mut result = parents;
+
+    for (kind, mut items) in children_by_kind {
+        // Dedupe by id
+        items.sort_by(|a, b| a.id.cmp(&b.id));
+        items.dedup_by(|a, b| a.id == b.id);
+
+        if items.len() <= 2 {
+            result.extend(items);
+        } else {
+            let label = match kind.as_str() {
+                "person" => format!("{} people", items.len()),
+                "task" => format!("{} tasks", items.len()),
+                "note" => format!("{} notes", items.len()),
+                "project" => format!("{} projects", items.len()),
+                "inbox" => format!("{} thoughts", items.len()),
+                _ => format!("{} {}", items.len(), kind),
+            };
+            result.push(LinkBadge {
+                kind: kind.clone(),
+                label,
+                id: format!("count:{kind}:{}", items.len()),
+                direction: "child".into(),
+            });
+        }
+    }
+
+    // Cap total chips so the UI stays scannable
+    result.truncate(8);
+    result
 }
