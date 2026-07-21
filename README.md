@@ -19,6 +19,13 @@ Local-first personal operating system for knowledge work.
 
 **Not in v0.1** (later phases): AI, OCR, plugins, sync, multi-user.
 
+## Docs
+
+| Doc | Purpose |
+|-----|---------|
+| [docs/STATUS.md](./docs/STATUS.md) | What we built, current state, what’s left |
+| [docs/HOW_TO_USE.md](./docs/HOW_TO_USE.md) | How to use the app as it stands |
+
 ## Stack
 
 | Layer | Tech |
