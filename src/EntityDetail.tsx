@@ -838,6 +838,18 @@ export function EntityDetail({
               </ul>
             </section>
           )}
+
+          {entity.archived && (
+            <div className="detail-actions">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void setArchived(false)}
+              >
+                Restore
+              </button>
+            </div>
+          )}
         </>
       )}
     </aside>

@@ -346,7 +346,10 @@ pub fn list_entities(
             "#,
         );
 
-        if !include_archived {
+        if include_archived {
+            // Trash view: only archived items
+            sql.push_str(" AND archived = 1");
+        } else {
             sql.push_str(" AND archived = 0");
         }
         if entity_type.is_some() {

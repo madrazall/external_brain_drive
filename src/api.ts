@@ -42,6 +42,14 @@ export const api = {
       limit,
     }),
 
+  /** Soft-deleted items only (archived = 1). */
+  entityListArchived: (limit = 200) =>
+    invoke<Entity[]>("entity_list", {
+      entityType: null,
+      includeArchived: true,
+      limit,
+    }),
+
   entitySearch: (query: string, limit = 50) =>
     invoke<Entity[]>("entity_search", { query, limit }),
 

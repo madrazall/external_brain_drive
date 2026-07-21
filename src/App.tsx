@@ -28,7 +28,14 @@ import type {
 } from "./types";
 import "./App.css";
 
-type View = "home" | "projects" | "people" | "docs" | "search" | "backups";
+type View =
+  | "home"
+  | "projects"
+  | "people"
+  | "docs"
+  | "search"
+  | "archived"
+  | "backups";
 
 function formatWhen(iso: string): string {
   try {
@@ -91,6 +98,7 @@ function App() {
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [docProjectId, setDocProjectId] = useState("");
   const [attachDocId, setAttachDocId] = useState("");
+  const [archivedItems, setArchivedItems] = useState<Entity[]>([]);
 
   const [contactName, setContactName] = useState("");
   const [contactForm, setContactForm] = useState<ContactInfo>(emptyContactForm());
@@ -202,6 +210,18 @@ function App() {
   useEffect(() => {
     if (view === "backups" && workspace) void refreshBackups();
   }, [view, workspace, refreshBackups]);
+
+  const refreshArchived = useCallback(async () => {
+    try {
+      setArchivedItems(await api.entityListArchived(300));
+    } catch {
+      setArchivedItems([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (view === "archived" && workspace) void refreshArchived();
+  }, [view, workspace, refreshArchived]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -555,6 +575,7 @@ function App() {
 
   const handleEntityChanged = async () => {
     await refreshLists();
+    if (view === "archived") await refreshArchived();
     if (selectedProjectId) {
       try {
         setProjectEntities(await api.projectListEntities(selectedProjectId));
@@ -568,6 +589,22 @@ function App() {
       } catch {
         /* ignore */
       }
+    }
+  };
+
+  const restoreArchived = async (entity: Entity) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.entityUpdate({ id: entity.id, archived: false });
+      await refreshLists();
+      await refreshArchived();
+      showStatus(`Restored: ${entity.title}`);
+      if (selectedEntityId === entity.id) setSelectedEntityId(null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -833,6 +870,16 @@ function App() {
             title="Search"
           >
             Find
+          </button>
+          <button
+            className={view === "archived" ? "nav active" : "nav"}
+            onClick={() => setView("archived")}
+            title="Archived"
+          >
+            Arch
+            {archivedItems.length > 0 && (
+              <span className="nav-count">{archivedItems.length}</span>
+            )}
           </button>
           <button
             className={view === "backups" ? "nav active" : "nav"}
@@ -1488,6 +1535,72 @@ function App() {
                         showToggle: e.entityType === "task",
                       }),
                     )}
+                  </ul>
+                )}
+              </section>
+            </>
+          )}
+
+          {view === "archived" && (
+            <>
+              <header className="page-header compact-header">
+                <h1>Archived_</h1>
+                <p>Hidden from Home and lists. Restore anytime.</p>
+              </header>
+              <section className="panel">
+                <div className="row">
+                  <button
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => void refreshArchived()}
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </section>
+              <section className="panel">
+                <div className="panel-head">
+                  <h2>Items</h2>
+                  <span className="muted">{archivedItems.length}</span>
+                </div>
+                {archivedItems.length === 0 ? (
+                  <p className="empty">Nothing archived</p>
+                ) : (
+                  <ul className="entity-list">
+                    {archivedItems.map((e) => (
+                      <li key={e.id}>
+                        <div className="archived-row">
+                          <button
+                            type="button"
+                            className={
+                              selectedEntityId === e.id
+                                ? "entity-row selected"
+                                : "entity-row"
+                            }
+                            onClick={() => setSelectedEntityId(e.id)}
+                          >
+                            <span className={`badge type-${e.entityType}`}>
+                              {typeLabel(e.entityType)}
+                            </span>
+                            <div className="entity-row-body">
+                              <strong>{e.title}</strong>
+                              {e.description && <p>{e.description}</p>}
+                              <small className="muted">
+                                {formatRelative(e.updatedAt)}
+                              </small>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary small"
+                            disabled={busy}
+                            onClick={() => void restoreArchived(e)}
+                          >
+                            Restore
+                          </button>
+                        </div>
+                      </li>
+                    ))}
                   </ul>
                 )}
               </section>
