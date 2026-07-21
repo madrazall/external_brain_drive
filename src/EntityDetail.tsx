@@ -429,14 +429,6 @@ export function EntityDetail({
                                 Email
                               </a>
                             )}
-                            <button
-                              type="button"
-                              className="linkish"
-                              onClick={() => {
-                                /* open this person in detail by bubbling via onChanged pattern — parent owns selection */
-                              }}
-                              style={{ display: "none" }}
-                            />
                           </div>
                         </div>
                         <button
