@@ -7,6 +7,7 @@ import {
 } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "./api";
 import { ContactCard } from "./ContactCard";
 import { EntityDetail } from "./EntityDetail";
@@ -19,6 +20,7 @@ import {
 } from "./labels";
 import type {
   BackupInfo,
+  DocumentInfo,
   Entity,
   EntityType,
   LinkBadge,
@@ -26,7 +28,7 @@ import type {
 } from "./types";
 import "./App.css";
 
-type View = "home" | "projects" | "people" | "search" | "backups";
+type View = "home" | "projects" | "people" | "docs" | "search" | "backups";
 
 function formatWhen(iso: string): string {
   try {
@@ -86,6 +88,9 @@ function App() {
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [badgeMap, setBadgeMap] = useState<Record<string, LinkBadge[]>>({});
+  const [documents, setDocuments] = useState<DocumentInfo[]>([]);
+  const [docProjectId, setDocProjectId] = useState("");
+  const [attachDocId, setAttachDocId] = useState("");
 
   const [contactName, setContactName] = useState("");
   const [contactForm, setContactForm] = useState<ContactInfo>(emptyContactForm());
@@ -121,15 +126,17 @@ function App() {
   };
 
   const refreshLists = useCallback(async () => {
-    const [all, projectList, peopleList, badges] = await Promise.all([
+    const [all, projectList, peopleList, badges, docs] = await Promise.all([
       api.entityList(undefined, 400),
       api.entityList("project", 100),
       api.entityList("person", 300),
       api.entityBadges().catch(() => []),
+      api.documentList().catch(() => [] as DocumentInfo[]),
     ]);
     setEntities(all);
     setProjects(projectList);
     setPeople(peopleList);
+    setDocuments(docs);
     const map: Record<string, LinkBadge[]> = {};
     for (const row of badges) {
       map[row.entityId] = row.badges;
@@ -448,6 +455,90 @@ function App() {
     }
   };
 
+  const importDocument = async (forProjectId?: string) => {
+    setError(null);
+    setBusy(true);
+    try {
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        title: "Import document into workspace",
+      });
+      if (!picked || Array.isArray(picked)) {
+        setBusy(false);
+        return;
+      }
+      const projectId = forProjectId || docProjectId || undefined;
+      const doc = await api.documentImport(picked, projectId);
+      await refreshLists();
+      if (selectedProjectId) {
+        setProjectEntities(await api.projectListEntities(selectedProjectId));
+      }
+      setSelectedEntityId(doc.id);
+      showStatus(`Imported: ${doc.fileName}`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openDocumentFile = async (doc: DocumentInfo) => {
+    if (!doc.exists) {
+      setError("File missing on disk — check Documents folder.");
+      return;
+    }
+    try {
+      await openPath(doc.absolutePath);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const revealDocument = async (doc: DocumentInfo) => {
+    if (!doc.exists) {
+      setError("File missing on disk.");
+      return;
+    }
+    try {
+      await revealItemInDir(doc.absolutePath);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const openDocumentsFolder = async () => {
+    try {
+      const folder = await api.documentFolder();
+      await openPath(folder);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const linkDocToProject = async (documentId: string, projectId: string) => {
+    if (!projectId) return;
+    setBusy(true);
+    try {
+      await api.documentLinkProject(documentId, projectId);
+      await refreshLists();
+      if (selectedProjectId) {
+        setProjectEntities(await api.projectListEntities(selectedProjectId));
+      }
+      showStatus("Document linked to project");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const attachDocToSelectedProject = async () => {
+    if (!selectedProjectId || !attachDocId) return;
+    await linkDocToProject(attachDocId, selectedProjectId);
+    setAttachDocId("");
+  };
+
   const detachContact = async (personId: string) => {
     if (!selectedProjectId) return;
     setBusy(true);
@@ -507,10 +598,24 @@ function App() {
     [projectEntities],
   );
 
-  const projectWork = useMemo(
-    () => projectEntities.filter((e) => e.entityType !== "person"),
+  const projectDocs = useMemo(
+    () => projectEntities.filter((e) => e.entityType === "document"),
     [projectEntities],
   );
+
+  const projectWork = useMemo(
+    () =>
+      projectEntities.filter(
+        (e) => e.entityType !== "person" && e.entityType !== "document",
+      ),
+    [projectEntities],
+  );
+
+  const formatSize = (n: number) => {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
   const filteredPeople = useMemo(() => {
     const q = contactSearch.trim().toLowerCase();
@@ -714,6 +819,13 @@ function App() {
             title="People"
           >
             People
+          </button>
+          <button
+            className={view === "docs" ? "nav active" : "nav"}
+            onClick={() => setView("docs")}
+            title="Documents"
+          >
+            Docs
           </button>
           <button
             className={view === "search" ? "nav active" : "nav"}
@@ -966,6 +1078,104 @@ function App() {
                           Add
                         </button>
                       </div>
+                      <h3 className="subhead">Documents</h3>
+                      {projectDocs.length === 0 ? (
+                        <p className="empty">No files on this project.</p>
+                      ) : (
+                        <ul className="entity-list">
+                          {projectDocs.map((e) => {
+                            const doc = documents.find((d) => d.id === e.id);
+                            return (
+                              <li key={e.id}>
+                                <div className="doc-row">
+                                  <button
+                                    type="button"
+                                    className="entity-row"
+                                    onClick={() => setSelectedEntityId(e.id)}
+                                  >
+                                    <span className="badge type-document">
+                                      Doc
+                                    </span>
+                                    <div className="entity-row-body">
+                                      <strong>{e.title}</strong>
+                                      <small className="muted">
+                                        {doc?.fileName ?? "file"}
+                                        {doc
+                                          ? ` · ${formatSize(doc.sizeBytes)}`
+                                          : ""}
+                                        {doc && !doc.exists
+                                          ? " · missing"
+                                          : ""}
+                                      </small>
+                                    </div>
+                                  </button>
+                                  <div className="doc-actions">
+                                    {doc && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          className="secondary small"
+                                          disabled={!doc.exists || busy}
+                                          onClick={() =>
+                                            void openDocumentFile(doc)
+                                          }
+                                        >
+                                          Open
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="secondary small"
+                                          disabled={!doc.exists || busy}
+                                          onClick={() =>
+                                            void revealDocument(doc)
+                                          }
+                                        >
+                                          Folder
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                      <div className="row tight attach-row">
+                        <select
+                          value={attachDocId}
+                          onChange={(e) => setAttachDocId(e.target.value)}
+                        >
+                          <option value="">Link document…</option>
+                          {documents
+                            .filter(
+                              (d) =>
+                                !projectDocs.some((p) => p.id === d.id),
+                            )
+                            .map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.title}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          className="secondary"
+                          disabled={busy || !attachDocId}
+                          onClick={() => void attachDocToSelectedProject()}
+                        >
+                          Link
+                        </button>
+                        <button
+                          className="secondary"
+                          disabled={busy}
+                          onClick={() =>
+                            void importDocument(selectedProjectId ?? undefined)
+                          }
+                        >
+                          Import
+                        </button>
+                      </div>
+
                       <h3 className="subhead">Items</h3>
                       {projectWork.length === 0 ? (
                         <p className="empty">Nothing linked to this project.</p>
@@ -982,6 +1192,136 @@ function App() {
                   )}
                 </section>
               </div>
+            </>
+          )}
+
+          {view === "docs" && (
+            <>
+              <header className="page-header compact-header">
+                <h1>Documents_</h1>
+                <p>
+                  Files live in the workspace Documents folder. Link them to
+                  projects.
+                </p>
+              </header>
+              <section className="panel">
+                <div className="row">
+                  <button
+                    disabled={busy}
+                    onClick={() => void importDocument()}
+                  >
+                    Import file
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => void openDocumentsFolder()}
+                  >
+                    Open folder
+                  </button>
+                </div>
+                <div className="row tight">
+                  <select
+                    value={docProjectId}
+                    onChange={(e) => setDocProjectId(e.target.value)}
+                  >
+                    <option value="">Import into project…</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="muted">
+                  Import copies the file into Documents/. Path is stored and can
+                  be attached to any project.
+                </p>
+              </section>
+              <section className="panel">
+                <div className="panel-head">
+                  <h2>Files</h2>
+                  <span className="muted">{documents.length}</span>
+                </div>
+                {documents.length === 0 ? (
+                  <p className="empty">No documents yet</p>
+                ) : (
+                  <ul className="doc-list">
+                    {documents.map((doc) => (
+                      <li key={doc.id}>
+                        <div className="doc-card">
+                          <button
+                            type="button"
+                            className="doc-card-main"
+                            onClick={() => setSelectedEntityId(doc.id)}
+                          >
+                            <span className="badge type-document">
+                              {doc.extension || "file"}
+                            </span>
+                            <div>
+                              <strong>{doc.title}</strong>
+                              <small className="muted">
+                                {doc.fileName} · {formatSize(doc.sizeBytes)}
+                                {!doc.exists ? " · missing on disk" : ""}
+                              </small>
+                              {doc.projectTitles.length > 0 && (
+                                <div className="link-badges">
+                                  {doc.projectTitles.map((t) => (
+                                    <span
+                                      key={t}
+                                      className="link-badge kind-project"
+                                    >
+                                      <em>Project</em>
+                                      {t}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                          <div className="doc-actions">
+                            <button
+                              type="button"
+                              className="secondary small"
+                              disabled={!doc.exists || busy}
+                              onClick={() => void openDocumentFile(doc)}
+                            >
+                              Open
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary small"
+                              disabled={!doc.exists || busy}
+                              onClick={() => void revealDocument(doc)}
+                            >
+                              Folder
+                            </button>
+                            <select
+                              className="doc-link-select"
+                              defaultValue=""
+                              disabled={busy}
+                              onChange={(e) => {
+                                const pid = e.target.value;
+                                e.target.value = "";
+                                if (pid) void linkDocToProject(doc.id, pid);
+                              }}
+                            >
+                              <option value="">+ Project</option>
+                              {projects
+                                .filter((p) => !doc.projectIds.includes(p.id))
+                                .map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.title}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
             </>
           )}
 

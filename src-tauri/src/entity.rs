@@ -6,7 +6,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const ALLOWED_TYPES: &[&str] = &["note", "task", "project", "person", "inbox"];
+const ALLOWED_TYPES: &[&str] = &["note", "task", "project", "person", "inbox", "document"];
 const ALLOWED_REL_TYPES: &[&str] = &[
     "owns",
     "contains",
@@ -673,6 +673,7 @@ fn compact_badges(badges: Vec<LinkBadge>) -> Vec<LinkBadge> {
                 "person" => format!("{} people", items.len()),
                 "task" => format!("{} tasks", items.len()),
                 "note" => format!("{} notes", items.len()),
+                "document" => format!("{} docs", items.len()),
                 "project" => format!("{} projects", items.len()),
                 "inbox" => format!("{} thoughts", items.len()),
                 _ => format!("{} {}", items.len(), kind),

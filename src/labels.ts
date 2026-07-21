@@ -13,6 +13,8 @@ export function typeLabel(type: string): string {
       return "Person";
     case "inbox":
       return "Thought";
+    case "document":
+      return "Doc";
     default:
       return type.charAt(0).toUpperCase() + type.slice(1);
   }
@@ -63,4 +65,5 @@ export const ALL_TYPES: { value: EntityType; label: string }[] = [
   { value: "task", label: "Task" },
   { value: "project", label: "Project" },
   { value: "person", label: "Person" },
+  { value: "document", label: "Doc" },
 ];

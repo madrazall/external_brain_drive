@@ -1,4 +1,5 @@
 use crate::backup::{self, BackupInfo};
+use crate::document::{self, DocumentInfo};
 use crate::entity::{
     self, CreateEntityInput, Entity, EntityBadges, EntityContext, Relationship,
     UpdateEntityInput,
@@ -124,4 +125,57 @@ pub fn entity_unlink(
     relationship_type: String,
 ) -> AppResult<bool> {
     entity::unlink_entities(&state, &from_entity_id, &to_entity_id, &relationship_type)
+}
+
+#[tauri::command]
+pub fn document_import(
+    state: State<'_, AppState>,
+    source_path: String,
+    project_id: Option<String>,
+    title: Option<String>,
+) -> AppResult<DocumentInfo> {
+    document::import_document(&state, &source_path, project_id, title)
+}
+
+#[tauri::command]
+pub fn document_list(state: State<'_, AppState>) -> AppResult<Vec<DocumentInfo>> {
+    document::list_documents(&state)
+}
+
+#[tauri::command]
+pub fn document_get(state: State<'_, AppState>, id: String) -> AppResult<DocumentInfo> {
+    document::get_document(&state, &id)
+}
+
+#[tauri::command]
+pub fn document_link_project(
+    state: State<'_, AppState>,
+    document_id: String,
+    project_id: String,
+) -> AppResult<DocumentInfo> {
+    document::link_document_to_project(&state, &document_id, &project_id)
+}
+
+#[tauri::command]
+pub fn document_unlink_project(
+    state: State<'_, AppState>,
+    document_id: String,
+    project_id: String,
+) -> AppResult<DocumentInfo> {
+    document::unlink_document_from_project(&state, &document_id, &project_id)
+}
+
+#[tauri::command]
+pub fn document_folder(state: State<'_, AppState>) -> AppResult<String> {
+    document::documents_folder_path(&state)
+}
+
+#[tauri::command]
+pub fn document_register(
+    state: State<'_, AppState>,
+    path: String,
+    project_id: Option<String>,
+    title: Option<String>,
+) -> AppResult<DocumentInfo> {
+    document::register_document(&state, &path, project_id, title)
 }

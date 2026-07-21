@@ -1,4 +1,10 @@
-export type EntityType = "note" | "task" | "project" | "person" | "inbox";
+export type EntityType =
+  | "note"
+  | "task"
+  | "project"
+  | "person"
+  | "inbox"
+  | "document";
 
 export interface WorkspaceInfo {
   name: string;
@@ -58,4 +64,21 @@ export interface LinkBadge {
 export interface EntityBadges {
   entityId: string;
   badges: LinkBadge[];
+}
+
+export interface DocumentInfo {
+  id: string;
+  title: string;
+  description: string;
+  fileName: string;
+  relativePath: string;
+  absolutePath: string;
+  sizeBytes: number;
+  extension: string;
+  exists: boolean;
+  createdAt: string;
+  updatedAt: string;
+  projectIds: string[];
+  projectTitles: string[];
+  archived: boolean;
 }

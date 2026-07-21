@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   BackupInfo,
   CreateEntityInput,
+  DocumentInfo,
   Entity,
   EntityBadges,
   EntityContext,
@@ -77,4 +78,30 @@ export const api = {
       toEntityId,
       relationshipType,
     }),
+
+  documentImport: (
+    sourcePath: string,
+    projectId?: string,
+    title?: string,
+  ) =>
+    invoke<DocumentInfo>("document_import", {
+      sourcePath,
+      projectId: projectId ?? null,
+      title: title ?? null,
+    }),
+
+  documentList: () => invoke<DocumentInfo[]>("document_list"),
+
+  documentGet: (id: string) => invoke<DocumentInfo>("document_get", { id }),
+
+  documentLinkProject: (documentId: string, projectId: string) =>
+    invoke<DocumentInfo>("document_link_project", { documentId, projectId }),
+
+  documentUnlinkProject: (documentId: string, projectId: string) =>
+    invoke<DocumentInfo>("document_unlink_project", {
+      documentId,
+      projectId,
+    }),
+
+  documentFolder: () => invoke<string>("document_folder"),
 };

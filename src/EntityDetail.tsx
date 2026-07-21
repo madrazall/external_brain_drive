@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   ALL_TYPES,
   readContact,
@@ -331,6 +332,72 @@ export function EntityDetail({
               }}
             />
           </label>
+
+          {entity.entityType === "document" && (
+            <section className="detail-section">
+              <h3>File</h3>
+              <p className="muted" style={{ marginBottom: "0.5rem" }}>
+                {String(entity.metadata?.fileName ?? "—")}
+                {entity.metadata?.relativePath
+                  ? ` · ${String(entity.metadata.relativePath)}`
+                  : ""}
+              </p>
+              <div className="detail-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        // Resolve via list path from relative metadata — open folder parent if needed
+                        const rel = String(entity.metadata?.relativePath ?? "");
+                        if (!rel) {
+                          onError("No file path on this document.");
+                          return;
+                        }
+                        // absolute path is not on entity; use project list reload via open from docs view ideally
+                        // Best-effort: try openPath with relative won't work — fetch document
+                        const { api } = await import("./api");
+                        const doc = await api.documentGet(entity.id);
+                        if (!doc.exists) {
+                          onError("File missing on disk.");
+                          return;
+                        }
+                        await openPath(doc.absolutePath);
+                      } catch (e) {
+                        onError(String(e));
+                      }
+                    })();
+                  }}
+                >
+                  Open file
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        const { api } = await import("./api");
+                        const doc = await api.documentGet(entity.id);
+                        if (!doc.exists) {
+                          onError("File missing on disk.");
+                          return;
+                        }
+                        await revealItemInDir(doc.absolutePath);
+                      } catch (e) {
+                        onError(String(e));
+                      }
+                    })();
+                  }}
+                >
+                  Show in folder
+                </button>
+              </div>
+            </section>
+          )}
 
           {entity.entityType === "person" && (
             <section className="detail-section contact-fields">

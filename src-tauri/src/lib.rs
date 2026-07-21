@@ -1,6 +1,7 @@
 mod backup;
 mod commands;
 mod db;
+mod document;
 mod entity;
 mod error;
 mod state;
@@ -32,6 +33,13 @@ pub fn run() {
             commands::entity_context,
             commands::entity_badges,
             commands::project_list_entities,
+            commands::document_import,
+            commands::document_list,
+            commands::document_get,
+            commands::document_link_project,
+            commands::document_unlink_project,
+            commands::document_folder,
+            commands::document_register,
         ])
         .run(tauri::generate_context!())
         .expect("error while running External Brain Drive");
