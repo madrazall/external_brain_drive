@@ -50,6 +50,7 @@ export const api = {
     description?: string;
     metadata?: Record<string, unknown>;
     archived?: boolean;
+    entityType?: string;
   }) => invoke<Entity>("entity_update", { input }),
 
   entityLink: (

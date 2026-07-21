@@ -76,6 +76,10 @@ button.small {
 
 button.nav {
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
@@ -88,6 +92,17 @@ button.nav.active {
   background: rgba(110, 168, 255, 0.12);
   color: var(--text);
   border-color: rgba(110, 168, 255, 0.25);
+}
+
+.nav-count {
+  font-size: 0.75rem;
+  min-width: 1.35rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(244, 114, 182, 0.2);
+  border: 1px solid rgba(244, 114, 182, 0.4);
+  color: var(--inbox);
+  text-align: center;
 }
 
 button.linkish {
@@ -251,9 +266,49 @@ h2 {
   gap: 0.65rem;
 }
 
+.main-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100%;
+  overflow: hidden;
+}
+
+.quick-bar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  z-index: 2;
+}
+
+.quick-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  font-size: 1.05rem;
+  padding: 0.75rem 1rem;
+  border-color: rgba(110, 168, 255, 0.35);
+  background: var(--bg);
+}
+
+.quick-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(61, 126, 255, 0.15);
+}
+
+.quick-submit {
+  flex: 0 0 auto;
+  padding: 0.75rem 1.15rem;
+}
+
 .main {
   padding: 1.25rem 1.5rem 2rem;
   overflow: auto;
+  flex: 1 1 auto;
 }
 
 .page-header {
@@ -879,6 +934,71 @@ button.danger {
   .app.with-detail {
     grid-template-columns: 200px 1fr minmax(280px, 340px);
   }
+}
+
+.thought-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.thought-item {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(15, 18, 24, 0.45);
+  overflow: hidden;
+}
+
+.thought-item.selected {
+  border-color: rgba(244, 114, 182, 0.5);
+}
+
+.thought-title {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  text-align: left;
+  padding: 0.75rem 0.85rem 0.45rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.thought-title span {
+  font-size: 1.02rem;
+  font-weight: 500;
+}
+
+.thought-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0 0.75rem 0.7rem;
+}
+
+button.sort-chip {
+  padding: 0.28rem 0.55rem;
+  font-size: 0.78rem;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+button.sort-chip:hover:not(:disabled) {
+  color: var(--text);
+  border-color: rgba(110, 168, 255, 0.45);
+  background: rgba(110, 168, 255, 0.1);
+}
+
+button.sort-chip.muted-chip {
+  color: var(--muted);
+  opacity: 0.85;
 }
 
 @media (max-width: 900px) {

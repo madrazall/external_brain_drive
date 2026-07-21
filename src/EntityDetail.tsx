@@ -399,9 +399,9 @@ export function EntityDetail({
 
           {entity.entityType === "project" && (
             <section className="detail-section">
-              <h3>Crew on this quest</h3>
+              <h3>People on this project</h3>
               {crew.length === 0 ? (
-                <p className="empty">No contacts attached yet.</p>
+                <p className="empty">No one linked yet.</p>
               ) : (
                 <ul className="contact-mini-list">
                   {crew.map((person) => {
@@ -450,7 +450,7 @@ export function EntityDetail({
                     value={linkPersonId}
                     onChange={(e) => setLinkPersonId(e.target.value)}
                   >
-                    <option value="">Attach contact…</option>
+                    <option value="">Add person…</option>
                     {availablePeople.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.title}
@@ -462,7 +462,7 @@ export function EntityDetail({
                     disabled={busy || !linkPersonId}
                     onClick={() => void attachPersonToQuest()}
                   >
-                    Attach
+                    Add
                   </button>
                 </div>
               )}
@@ -471,9 +471,9 @@ export function EntityDetail({
 
           {entity.entityType !== "project" && (
             <section className="detail-section">
-              <h3>Quests</h3>
+              <h3>Projects</h3>
               {context?.containingProjects.length === 0 ? (
-                <p className="empty">Not linked to any quest.</p>
+                <p className="empty">Not linked to a project.</p>
               ) : (
                 <ul className="chip-list">
                   {context?.containingProjects.map((p) => (
@@ -497,7 +497,7 @@ export function EntityDetail({
                     value={linkProjectId}
                     onChange={(e) => setLinkProjectId(e.target.value)}
                   >
-                    <option value="">Link to quest…</option>
+                    <option value="">Link to project…</option>
                     {availableProjects.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.title}

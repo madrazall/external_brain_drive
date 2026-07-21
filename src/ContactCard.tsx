@@ -6,7 +6,7 @@ interface ContactCardProps {
   selected?: boolean;
   quests?: Entity[];
   onOpen: () => void;
-  onDetachFromQuest?: () => void;
+  onDetach?: () => void;
   busy?: boolean;
 }
 
@@ -15,7 +15,7 @@ export function ContactCard({
   selected,
   quests,
   onOpen,
-  onDetachFromQuest,
+  onDetach,
   busy,
 }: ContactCardProps) {
   const c = readContact(person);
@@ -53,12 +53,12 @@ export function ContactCard({
         <button type="button" className="reach-btn" onClick={onOpen}>
           Info
         </button>
-        {onDetachFromQuest && (
+        {onDetach && (
           <button
             type="button"
             className="reach-btn"
             disabled={busy}
-            onClick={onDetachFromQuest}
+            onClick={onDetach}
           >
             Unlink
           </button>

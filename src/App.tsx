@@ -10,9 +10,8 @@ import { api } from "./api";
 import { ContactCard } from "./ContactCard";
 import { EntityDetail } from "./EntityDetail";
 import {
-  CAPTURE_TYPES,
-  FILTER_CHIPS,
   readContact,
+  SORT_TYPES,
   typeLabel,
   withContactMeta,
   type ContactInfo,
@@ -20,13 +19,7 @@ import {
 import type { BackupInfo, Entity, EntityType, WorkspaceInfo } from "./types";
 import "./App.css";
 
-type View =
-  | "focus"
-  | "inbox"
-  | "projects"
-  | "contacts"
-  | "search"
-  | "backups";
+type View = "home" | "projects" | "people" | "search" | "backups";
 
 function formatWhen(iso: string): string {
   try {
@@ -75,35 +68,29 @@ function App() {
   );
   const [projectEntities, setProjectEntities] = useState<Entity[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
-  const [view, setView] = useState<View>("focus");
+  const [view, setView] = useState<View>("home");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [inboxFilter, setInboxFilter] = useState<"all" | EntityType>("all");
 
-  const [captureTitle, setCaptureTitle] = useState("");
-  const [captureType, setCaptureType] = useState<EntityType>("note");
-  const [captureBody, setCaptureBody] = useState("");
-  const [captureProjectId, setCaptureProjectId] = useState("");
-
+  const [quickNote, setQuickNote] = useState("");
   const [newWorkspaceName, setNewWorkspaceName] = useState("My Brain");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Entity[]>([]);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  // Contact Center form
   const [contactName, setContactName] = useState("");
   const [contactForm, setContactForm] = useState<ContactInfo>(emptyContactForm());
   const [contactNotes, setContactNotes] = useState("");
-  const [contactQuestId, setContactQuestId] = useState("");
+  const [contactProjectId, setContactProjectId] = useState("");
   const [contactSearch, setContactSearch] = useState("");
   const [attachPersonId, setAttachPersonId] = useState("");
 
-  const titleInputRef = useRef<HTMLInputElement>(null);
+  const quickRef = useRef<HTMLInputElement>(null);
 
   const refreshLists = useCallback(async () => {
     const [all, projectList, peopleList] = await Promise.all([
-      api.entityList(undefined, 300),
+      api.entityList(undefined, 400),
       api.entityList("project", 100),
       api.entityList("person", 300),
     ]);
@@ -134,7 +121,7 @@ function App() {
 
   useEffect(() => {
     if (!statusMessage) return;
-    const t = window.setTimeout(() => setStatusMessage(null), 4000);
+    const t = window.setTimeout(() => setStatusMessage(null), 2500);
     return () => window.clearTimeout(t);
   }, [statusMessage]);
 
@@ -147,7 +134,7 @@ function App() {
           await refreshLists();
         }
       } catch {
-        // no workspace yet
+        // no workspace
       }
       await loadRecent();
     })();
@@ -168,15 +155,24 @@ function App() {
   }, [selectedProjectId, workspace, entities]);
 
   useEffect(() => {
-    if (view === "backups" && workspace) {
-      void refreshBackups();
-    }
+    if (view === "backups" && workspace) void refreshBackups();
   }, [view, workspace, refreshBackups]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && selectedEntityId) {
         setSelectedEntityId(null);
+        return;
+      }
+      // / focuses quick capture (unless typing in an input)
+      if (
+        e.key === "/" &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement) &&
+        !(e.target instanceof HTMLSelectElement)
+      ) {
+        e.preventDefault();
+        quickRef.current?.focus();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -184,16 +180,16 @@ function App() {
   }, [selectedEntityId]);
 
   useEffect(() => {
-    if (workspace && (view === "focus" || view === "inbox")) {
-      const t = window.setTimeout(() => titleInputRef.current?.focus(), 50);
+    if (workspace) {
+      const t = window.setTimeout(() => quickRef.current?.focus(), 80);
       return () => window.clearTimeout(t);
     }
-  }, [workspace, view]);
+  }, [workspace]);
 
   const enterWorkspace = async (info: WorkspaceInfo) => {
     setWorkspace(info);
     setSelectedEntityId(null);
-    setView("focus");
+    setView("home");
     await refreshLists();
     await loadRecent();
   };
@@ -207,7 +203,7 @@ function App() {
         const picked = await open({
           directory: true,
           multiple: false,
-          title: "Open External Brain Drive workspace",
+          title: "Open workspace",
         });
         if (!picked || Array.isArray(picked)) {
           setBusy(false);
@@ -215,8 +211,7 @@ function App() {
         }
         target = picked;
       }
-      const info = await api.workspaceOpen(target);
-      await enterWorkspace(info);
+      await enterWorkspace(await api.workspaceOpen(target));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -231,14 +226,15 @@ function App() {
       const parent = await open({
         directory: true,
         multiple: false,
-        title: "Choose parent folder for new workspace",
+        title: "Choose parent folder",
       });
       if (!parent || Array.isArray(parent)) {
         setBusy(false);
         return;
       }
-      const info = await api.workspaceCreate(parent, newWorkspaceName);
-      await enterWorkspace(info);
+      await enterWorkspace(
+        await api.workspaceCreate(parent, newWorkspaceName),
+      );
     } catch (e) {
       setError(String(e));
     } finally {
@@ -246,27 +242,57 @@ function App() {
     }
   };
 
-  const capture = async () => {
-    if (!captureTitle.trim()) {
-      setError("Title is required.");
-      titleInputRef.current?.focus();
-      return;
-    }
+  /** One line + Enter → thought pool. No type picker. No friction. */
+  const captureThought = async () => {
+    const title = quickNote.trim();
+    if (!title) return;
     setError(null);
+    const previous = quickNote;
+    setQuickNote(""); // optimistic — keep field free
+    try {
+      await api.entityCreate({
+        entityType: "inbox",
+        title,
+      });
+      await refreshLists();
+      quickRef.current?.focus();
+    } catch (e) {
+      setQuickNote(previous);
+      setError(String(e));
+      quickRef.current?.focus();
+    }
+  };
+
+  const sortThought = async (
+    entity: Entity,
+    entityType: EntityType,
+    projectId?: string,
+  ) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.entityUpdate({ id: entity.id, entityType });
+      if (projectId) {
+        await api.entityLink(projectId, entity.id, "contains");
+      }
+      if (selectedEntityId === entity.id) {
+        // keep detail open on the same item
+      }
+      await refreshLists();
+      showStatus(`→ ${typeLabel(entityType)}`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dismissThought = async (entity: Entity) => {
     setBusy(true);
     try {
-      const created = await api.entityCreate({
-        entityType: captureType,
-        title: captureTitle.trim(),
-        description: captureBody.trim(),
-        projectId: captureProjectId || undefined,
-      });
-      setCaptureTitle("");
-      setCaptureBody("");
+      await api.entityUpdate({ id: entity.id, archived: true });
+      if (selectedEntityId === entity.id) setSelectedEntityId(null);
       await refreshLists();
-      setSelectedEntityId(created.id);
-      showStatus(`Got it — ${typeLabel(created.entityType)}: ${created.title}`);
-      window.setTimeout(() => titleInputRef.current?.focus(), 30);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -276,7 +302,7 @@ function App() {
 
   const createContact = async () => {
     if (!contactName.trim()) {
-      setError("Contact name is required.");
+      setError("Name is required.");
       return;
     }
     setError(null);
@@ -287,15 +313,14 @@ function App() {
         title: contactName.trim(),
         description: contactNotes.trim(),
         metadata: withContactMeta({}, contactForm),
-        projectId: contactQuestId || undefined,
+        projectId: contactProjectId || undefined,
       });
       setContactName("");
       setContactForm(emptyContactForm());
       setContactNotes("");
-      setContactQuestId("");
+      setContactProjectId("");
       await refreshLists();
       setSelectedEntityId(created.id);
-      showStatus(`Contact saved: ${created.title}`);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -320,7 +345,7 @@ function App() {
     setBusy(true);
     try {
       const info = await api.backupCreate();
-      showStatus(`Backup saved: ${info.fileName}`);
+      showStatus(`Backup: ${info.fileName}`);
       await refreshBackups();
     } catch (e) {
       setError(String(e));
@@ -330,11 +355,13 @@ function App() {
   };
 
   const restoreBackup = async (backup: BackupInfo) => {
-    const ok = window.confirm(
-      `Restore from ${backup.fileName}?\n\nA safety backup of the current database will be created first. Your current data will be replaced by this snapshot.`,
-    );
-    if (!ok) return;
-
+    if (
+      !window.confirm(
+        `Restore ${backup.fileName}? A safety backup of the current data is made first.`,
+      )
+    ) {
+      return;
+    }
     setError(null);
     setBusy(true);
     try {
@@ -342,9 +369,7 @@ function App() {
       setSelectedEntityId(null);
       await refreshLists();
       await refreshBackups();
-      showStatus(
-        `Restored from ${backup.fileName}. Safety copy: ${safety.fileName}`,
-      );
+      showStatus(`Restored. Safety: ${safety.fileName}`);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -363,7 +388,6 @@ function App() {
         metadata: { ...entity.metadata, status: next },
       });
       await refreshLists();
-      showStatus(next === "done" ? `Done: ${entity.title}` : `Reopened: ${entity.title}`);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -371,7 +395,7 @@ function App() {
     }
   };
 
-  const attachContactToQuest = async () => {
+  const attachContactToProject = async () => {
     if (!selectedProjectId || !attachPersonId) return;
     setBusy(true);
     try {
@@ -379,7 +403,6 @@ function App() {
       setAttachPersonId("");
       setProjectEntities(await api.projectListEntities(selectedProjectId));
       await refreshLists();
-      showStatus("Contact attached to quest");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -387,7 +410,7 @@ function App() {
     }
   };
 
-  const detachContactFromQuest = async (personId: string) => {
+  const detachContact = async (personId: string) => {
     if (!selectedProjectId) return;
     setBusy(true);
     try {
@@ -407,82 +430,63 @@ function App() {
       try {
         setProjectEntities(await api.projectListEntities(selectedProjectId));
       } catch {
-        // ignore
+        /* ignore */
       }
     }
     if (searchQuery.trim()) {
       try {
         setSearchResults(await api.entitySearch(searchQuery));
       } catch {
-        // ignore
+        /* ignore */
       }
     }
   };
+
+  const thoughts = useMemo(
+    () => entities.filter((e) => e.entityType === "inbox"),
+    [entities],
+  );
 
   const openTasks = useMemo(
     () => entities.filter((e) => e.entityType === "task" && !isTaskDone(e)),
     [entities],
   );
 
-  const recentlyTouched = useMemo(() => {
-    return [...entities]
-      .sort(
-        (a, b) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-      )
-      .slice(0, 12);
-  }, [entities]);
+  const recentItems = useMemo(
+    () =>
+      [...entities]
+        .filter((e) => e.entityType !== "inbox")
+        .sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+        )
+        .slice(0, 10),
+    [entities],
+  );
 
-  const inboxItems = useMemo(() => {
-    if (inboxFilter === "all") {
-      return entities.filter((e) => e.entityType !== "project");
-    }
-    return entities.filter((e) => e.entityType === inboxFilter);
-  }, [entities, inboxFilter]);
-
-  const questCrew = useMemo(
+  const projectPeople = useMemo(
     () => projectEntities.filter((e) => e.entityType === "person"),
     [projectEntities],
   );
 
-  const questWork = useMemo(
+  const projectWork = useMemo(
     () => projectEntities.filter((e) => e.entityType !== "person"),
     [projectEntities],
   );
 
-  const filteredContacts = useMemo(() => {
+  const filteredPeople = useMemo(() => {
     const q = contactSearch.trim().toLowerCase();
     if (!q) return people;
     return people.filter((p) => {
       const c = readContact(p);
-      const hay = [
-        p.title,
-        p.description,
-        c.phone,
-        c.email,
-        c.company,
-        c.role,
-      ]
+      return [p.title, p.description, c.phone, c.email, c.company, c.role]
         .join(" ")
-        .toLowerCase();
-      return hay.includes(q);
+        .toLowerCase()
+        .includes(q);
     });
   }, [people, contactSearch]);
 
-  /** Map person id → quests they belong to (from currently loaded project memberships is incomplete).
-   *  We approximate via each person's containing projects when detail loads;
-   *  for list, show nothing unless we fetch — skip per-person quests for list speed. */
-  const stats = useMemo(
-    () => ({
-      total: entities.length,
-      tasksOpen: openTasks.length,
-      contacts: people.length,
-      quests: projects.length,
-    }),
-    [entities.length, openTasks.length, people.length, projects.length],
-  );
-
-  const renderEntityRow = (e: Entity, opts?: { showToggle?: boolean }) => {
+  const renderRow = (e: Entity, opts?: { showToggle?: boolean }) => {
     const done = e.entityType === "task" && isTaskDone(e);
     return (
       <li key={e.id}>
@@ -497,7 +501,6 @@ function App() {
             <button
               type="button"
               className={done ? "task-check checked" : "task-check"}
-              title={done ? "Mark open" : "Mark done"}
               disabled={busy}
               onClick={(ev) => void toggleTaskDone(e, ev)}
               aria-label={done ? "Mark open" : "Mark done"}
@@ -518,13 +521,6 @@ function App() {
             <div className="entity-row-body">
               <strong className={done ? "done" : undefined}>{e.title}</strong>
               {e.description && <p>{e.description}</p>}
-              {e.entityType === "person" && (() => {
-                const c = readContact(e);
-                const bits = [c.phone, c.email].filter(Boolean);
-                return bits.length ? (
-                  <p className="contact-line">{bits.join(" · ")}</p>
-                ) : null;
-              })()}
               <small className="muted">{formatRelative(e.updatedAt)}</small>
             </div>
           </button>
@@ -533,66 +529,31 @@ function App() {
     );
   };
 
-  const capturePanel = (
-    <section className="panel capture">
-      <div className="row capture-title-row">
-        <select
-          className="type-select"
-          value={captureType}
-          onChange={(e) => setCaptureType(e.target.value as EntityType)}
-          aria-label="Type"
-          title={CAPTURE_TYPES.find((t) => t.value === captureType)?.label}
-        >
-          {CAPTURE_TYPES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-        <input
-          ref={titleInputRef}
-          className="title-input"
-          value={captureTitle}
-          onChange={(e) => setCaptureTitle(e.target.value)}
-          placeholder="Drop it here — Enter to save"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void capture();
-            }
-          }}
-        />
-      </div>
-      <textarea
-        value={captureBody}
-        onChange={(e) => setCaptureBody(e.target.value)}
-        placeholder="Optional details…"
-        rows={2}
+  const quickBar = (
+    <div className="quick-bar">
+      <input
+        ref={quickRef}
+        className="quick-input"
+        value={quickNote}
+        onChange={(e) => setQuickNote(e.target.value)}
+        placeholder="Quick note — type and press Enter"
+        autoComplete="off"
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          if (e.key === "Enter") {
             e.preventDefault();
-            void capture();
+            void captureThought();
           }
         }}
       />
-      <div className="row capture-actions-row">
-        <select
-          className="project-select"
-          value={captureProjectId}
-          onChange={(e) => setCaptureProjectId(e.target.value)}
-        >
-          <option value="">No quest</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.title}
-            </option>
-          ))}
-        </select>
-        <button disabled={busy} onClick={() => void capture()}>
-          Get This
-        </button>
-      </div>
-    </section>
+      <button
+        type="button"
+        className="quick-submit"
+        disabled={!quickNote.trim()}
+        onClick={() => void captureThought()}
+      >
+        Add
+      </button>
+    </div>
   );
 
   if (!workspace) {
@@ -600,22 +561,18 @@ function App() {
       <div className="shell welcome">
         <div className="welcome-card">
           <p className="eyebrow">External Brain Drive</p>
-          <h1>Your local-first external brain</h1>
+          <h1>Your notes, tasks, and people — local</h1>
           <p className="lede">
-            Capture chaos, run quests, reach people fast — all offline, on your
-            machine.
+            Dump thoughts fast. Sort later. Everything stays on your computer.
           </p>
-
           {error && <div className="banner error">{error}</div>}
-
           <section className="panel">
-            <h2>Create workspace</h2>
+            <h2>New workspace</h2>
             <label>
               Name
               <input
                 value={newWorkspaceName}
                 onChange={(e) => setNewWorkspaceName(e.target.value)}
-                placeholder="My Brain"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void createWorkspace();
                 }}
@@ -625,7 +582,6 @@ function App() {
               Choose folder & create
             </button>
           </section>
-
           <section className="panel">
             <h2>Open workspace</h2>
             <button
@@ -633,7 +589,7 @@ function App() {
               disabled={busy}
               onClick={() => void openExisting()}
             >
-              Browse for workspace folder
+              Browse…
             </button>
             {recent.length > 0 && (
               <div className="recent">
@@ -668,28 +624,25 @@ function App() {
         </div>
         <nav>
           <button
-            className={view === "focus" ? "nav active" : "nav"}
-            onClick={() => setView("focus")}
+            className={view === "home" ? "nav active" : "nav"}
+            onClick={() => setView("home")}
           >
-            Right Now
-          </button>
-          <button
-            className={view === "inbox" ? "nav active" : "nav"}
-            onClick={() => setView("inbox")}
-          >
-            Get This
+            Home
+            {thoughts.length > 0 && (
+              <span className="nav-count">{thoughts.length}</span>
+            )}
           </button>
           <button
             className={view === "projects" ? "nav active" : "nav"}
             onClick={() => setView("projects")}
           >
-            Quests
+            Projects
           </button>
           <button
-            className={view === "contacts" ? "nav active" : "nav"}
-            onClick={() => setView("contacts")}
+            className={view === "people" ? "nav active" : "nav"}
+            onClick={() => setView("people")}
           >
-            Contact Center
+            People
           </button>
           <button
             className={view === "search" ? "nav active" : "nav"}
@@ -705,9 +658,8 @@ function App() {
           </button>
         </nav>
         <div className="sidebar-stats muted">
-          <span>{stats.tasksOpen} open tasks</span>
-          <span>{stats.contacts} contacts</span>
-          <span>{stats.quests} quests</span>
+          <span>{thoughts.length} unsorted</span>
+          <span>{openTasks.length} open tasks</span>
         </div>
         <div className="sidebar-foot">
           <p className="muted path" title={workspace.path}>
@@ -728,9 +680,7 @@ function App() {
               setProjects([]);
               setPeople([]);
               setSelectedEntityId(null);
-              setBackups([]);
-              setStatusMessage(null);
-              setView("focus");
+              setView("home");
             }}
           >
             Switch workspace
@@ -738,149 +688,80 @@ function App() {
         </div>
       </aside>
 
-      <main className="main">
-        {error && <div className="banner error">{error}</div>}
-        {statusMessage && (
-          <div className="banner success">{statusMessage}</div>
-        )}
+      <div className="main-column">
+        {quickBar}
 
-        {view === "focus" && (
-          <>
-            <header className="page-header">
-              <h1>Right Now</h1>
-              <p>
-                Open tasks and what you just touched. Dump chaos below —{" "}
-                <kbd>Enter</kbd> locks it in.
-              </p>
-            </header>
+        <main className="main">
+          {error && <div className="banner error">{error}</div>}
+          {statusMessage && (
+            <div className="banner success">{statusMessage}</div>
+          )}
 
-            {capturePanel}
+          {view === "home" && (
+            <>
+              <header className="page-header">
+                <h1>Thoughts</h1>
+                <p>
+                  Unsorted stuff lands here. Click to open, or sort with one
+                  tap. Press <kbd>/</kbd> anytime to capture.
+                </p>
+              </header>
 
-            <div className="split focus-split">
-              <section className="panel">
+              <section className="panel thought-pool">
                 <div className="panel-head">
-                  <h2>Open tasks</h2>
-                  <span className="muted">{openTasks.length}</span>
+                  <h2>Pool</h2>
+                  <span className="muted">
+                    {thoughts.length === 0
+                      ? "empty — good"
+                      : `${thoughts.length} waiting`}
+                  </span>
                 </div>
-                {openTasks.length === 0 ? (
+                {thoughts.length === 0 ? (
                   <p className="empty">
-                    Nothing on fire. Capture a <strong>Task</strong> when
-                    something is.
+                    Nothing waiting. Use the bar at the top when something pops
+                    into your head.
                   </p>
                 ) : (
-                  <ul className="entity-list">
-                    {openTasks.map((e) =>
-                      renderEntityRow(e, { showToggle: true }),
-                    )}
-                  </ul>
-                )}
-              </section>
-
-              <section className="panel">
-                <div className="panel-head">
-                  <h2>Recently touched</h2>
-                  <span className="muted">{recentlyTouched.length}</span>
-                </div>
-                {recentlyTouched.length === 0 ? (
-                  <p className="empty">Blank slate. Get something in.</p>
-                ) : (
-                  <ul className="entity-list">
-                    {recentlyTouched.map((e) =>
-                      renderEntityRow(e, {
-                        showToggle: e.entityType === "task",
-                      }),
-                    )}
-                  </ul>
-                )}
-              </section>
-            </div>
-          </>
-        )}
-
-        {view === "inbox" && (
-          <>
-            <header className="page-header">
-              <h1>Get This</h1>
-              <p>
-                Capture before it escapes. <kbd>Enter</kbd> saves ·{" "}
-                <kbd>Esc</kbd> closes detail.
-              </p>
-            </header>
-
-            {capturePanel}
-
-            <section className="panel">
-              <div className="panel-head">
-                <h2>Everything in</h2>
-                <span className="muted">{inboxItems.length}</span>
-              </div>
-              <div className="chip-row">
-                {FILTER_CHIPS.map((chip) => (
-                  <button
-                    key={chip.value}
-                    type="button"
-                    className={
-                      inboxFilter === chip.value ? "chip active" : "chip"
-                    }
-                    onClick={() => setInboxFilter(chip.value)}
-                  >
-                    {chip.label}
-                  </button>
-                ))}
-              </div>
-              {inboxItems.length === 0 ? (
-                <p className="empty">Nothing in this filter yet.</p>
-              ) : (
-                <ul className="entity-list">
-                  {inboxItems.map((e) =>
-                    renderEntityRow(e, {
-                      showToggle: e.entityType === "task",
-                    }),
-                  )}
-                </ul>
-              )}
-            </section>
-          </>
-        )}
-
-        {view === "projects" && (
-          <>
-            <header className="page-header">
-              <h1>Quests &amp; Side Quests</h1>
-              <p>
-                Big missions and the little ones that support them. Attach crew
-                for one-tap call / email when it gets urgent.
-              </p>
-            </header>
-
-            <div className="split">
-              <section className="panel">
-                <h2>All quests</h2>
-                {projects.length === 0 ? (
-                  <p className="empty">
-                    Start a quest from <strong>Get This</strong> (type Quest).
-                  </p>
-                ) : (
-                  <ul className="entity-list compact">
-                    {projects.map((p) => (
-                      <li key={p.id}>
-                        <div className="project-pick">
+                  <ul className="thought-list">
+                    {thoughts.map((t) => (
+                      <li
+                        key={t.id}
+                        className={
+                          selectedEntityId === t.id
+                            ? "thought-item selected"
+                            : "thought-item"
+                        }
+                      >
+                        <button
+                          type="button"
+                          className="thought-title"
+                          onClick={() => setSelectedEntityId(t.id)}
+                        >
+                          <span>{t.title}</span>
+                          <small className="muted">
+                            {formatRelative(t.updatedAt)}
+                          </small>
+                        </button>
+                        <div className="thought-actions">
+                          {SORT_TYPES.map((s) => (
+                            <button
+                              key={s.value}
+                              type="button"
+                              className="sort-chip"
+                              disabled={busy}
+                              title={`Make this a ${s.label.toLowerCase()}`}
+                              onClick={() => void sortThought(t, s.value)}
+                            >
+                              {s.label}
+                            </button>
+                          ))}
                           <button
-                            className={
-                              selectedProjectId === p.id
-                                ? "linkish active"
-                                : "linkish"
-                            }
-                            onClick={() => setSelectedProjectId(p.id)}
-                          >
-                            {p.title}
-                          </button>
-                          <button
-                            className="secondary small"
                             type="button"
-                            onClick={() => setSelectedEntityId(p.id)}
+                            className="sort-chip muted-chip"
+                            disabled={busy}
+                            onClick={() => void dismissThought(t)}
                           >
-                            Edit
+                            Dismiss
                           </button>
                         </div>
                       </li>
@@ -889,326 +770,383 @@ function App() {
                 )}
               </section>
 
-              <section className="panel">
-                <h2>
-                  {selectedProjectId
-                    ? projects.find((p) => p.id === selectedProjectId)?.title ??
-                      "Quest"
-                    : "Select a quest"}
-                </h2>
-                {!selectedProjectId ? (
-                  <p className="empty">Pick a quest to see work and crew.</p>
-                ) : (
-                  <>
-                    <h3 className="subhead">Crew — reach fast</h3>
-                    {questCrew.length === 0 ? (
-                      <p className="empty">
-                        No contacts on this quest yet. Attach one below or from
-                        Contact Center.
-                      </p>
-                    ) : (
-                      <div className="contact-grid">
-                        {questCrew.map((person) => (
-                          <ContactCard
-                            key={person.id}
-                            person={person}
-                            selected={selectedEntityId === person.id}
-                            onOpen={() => setSelectedEntityId(person.id)}
-                            busy={busy}
-                            onDetachFromQuest={() =>
-                              void detachContactFromQuest(person.id)
-                            }
-                          />
-                        ))}
-                      </div>
+              {openTasks.length > 0 && (
+                <section className="panel">
+                  <div className="panel-head">
+                    <h2>Open tasks</h2>
+                    <span className="muted">{openTasks.length}</span>
+                  </div>
+                  <ul className="entity-list">
+                    {openTasks.map((e) =>
+                      renderRow(e, { showToggle: true }),
                     )}
+                  </ul>
+                </section>
+              )}
 
-                    <div className="row tight attach-row">
-                      <select
-                        value={attachPersonId}
-                        onChange={(e) => setAttachPersonId(e.target.value)}
-                      >
-                        <option value="">Attach contact…</option>
-                        {people
-                          .filter(
-                            (p) => !questCrew.some((c) => c.id === p.id),
-                          )
-                          .map((p) => (
-                            <option key={p.id} value={p.id}>
+              {recentItems.length > 0 && (
+                <section className="panel">
+                  <div className="panel-head">
+                    <h2>Recent</h2>
+                  </div>
+                  <ul className="entity-list">
+                    {recentItems.map((e) =>
+                      renderRow(e, {
+                        showToggle: e.entityType === "task",
+                      }),
+                    )}
+                  </ul>
+                </section>
+              )}
+            </>
+          )}
+
+          {view === "projects" && (
+            <>
+              <header className="page-header">
+                <h1>Projects</h1>
+                <p>
+                  Group notes, tasks, and people. Sort thoughts into a project
+                  from Home, or open something and link it.
+                </p>
+              </header>
+              <div className="split">
+                <section className="panel">
+                  <h2>All projects</h2>
+                  {projects.length === 0 ? (
+                    <p className="empty">
+                      No projects yet. Capture a thought and sort it as
+                      Project, or create one from a detail view.
+                    </p>
+                  ) : (
+                    <ul className="entity-list compact">
+                      {projects.map((p) => (
+                        <li key={p.id}>
+                          <div className="project-pick">
+                            <button
+                              className={
+                                selectedProjectId === p.id
+                                  ? "linkish active"
+                                  : "linkish"
+                              }
+                              onClick={() => setSelectedProjectId(p.id)}
+                            >
                               {p.title}
-                            </option>
+                            </button>
+                            <button
+                              className="secondary small"
+                              type="button"
+                              onClick={() => setSelectedEntityId(p.id)}
+                            >
+                              Open
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+                <section className="panel">
+                  <h2>
+                    {selectedProjectId
+                      ? projects.find((p) => p.id === selectedProjectId)
+                          ?.title ?? "Project"
+                      : "Select a project"}
+                  </h2>
+                  {!selectedProjectId ? (
+                    <p className="empty">Pick a project on the left.</p>
+                  ) : (
+                    <>
+                      <h3 className="subhead">People</h3>
+                      {projectPeople.length === 0 ? (
+                        <p className="empty">No one linked yet.</p>
+                      ) : (
+                        <div className="contact-grid">
+                          {projectPeople.map((person) => (
+                            <ContactCard
+                              key={person.id}
+                              person={person}
+                              selected={selectedEntityId === person.id}
+                              onOpen={() => setSelectedEntityId(person.id)}
+                              busy={busy}
+                              onDetach={() => void detachContact(person.id)}
+                            />
                           ))}
-                      </select>
-                      <button
-                        className="secondary"
-                        disabled={busy || !attachPersonId}
-                        onClick={() => void attachContactToQuest()}
-                      >
-                        Attach
-                      </button>
-                    </div>
+                        </div>
+                      )}
+                      <div className="row tight attach-row">
+                        <select
+                          value={attachPersonId}
+                          onChange={(e) => setAttachPersonId(e.target.value)}
+                        >
+                          <option value="">Add person…</option>
+                          {people
+                            .filter(
+                              (p) =>
+                                !projectPeople.some((c) => c.id === p.id),
+                            )
+                            .map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.title}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          className="secondary"
+                          disabled={busy || !attachPersonId}
+                          onClick={() => void attachContactToProject()}
+                        >
+                          Add
+                        </button>
+                      </div>
+                      <h3 className="subhead">Items</h3>
+                      {projectWork.length === 0 ? (
+                        <p className="empty">Nothing linked to this project.</p>
+                      ) : (
+                        <ul className="entity-list">
+                          {projectWork.map((e) =>
+                            renderRow(e, {
+                              showToggle: e.entityType === "task",
+                            }),
+                          )}
+                        </ul>
+                      )}
+                    </>
+                  )}
+                </section>
+              </div>
+            </>
+          )}
 
-                    <h3 className="subhead">Work on this quest</h3>
-                    {questWork.length === 0 ? (
-                      <p className="empty">
-                        No notes/tasks linked. Capture with this quest
-                        selected.
-                      </p>
-                    ) : (
-                      <ul className="entity-list">
-                        {questWork.map((e) =>
-                          renderEntityRow(e, {
-                            showToggle: e.entityType === "task",
-                          }),
-                        )}
-                      </ul>
-                    )}
-                  </>
+          {view === "people" && (
+            <>
+              <header className="page-header">
+                <h1>People</h1>
+                <p>
+                  Phone and email for people you need. Link them to a project
+                  so you can reach them from there.
+                </p>
+              </header>
+              <section className="panel">
+                <h2>Add person</h2>
+                <div className="contact-form-grid">
+                  <label>
+                    Name
+                    <input
+                      value={contactName}
+                      onChange={(e) => setContactName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void createContact();
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Phone
+                    <input
+                      value={contactForm.phone}
+                      onChange={(e) =>
+                        setContactForm((c) => ({
+                          ...c,
+                          phone: e.target.value,
+                        }))
+                      }
+                      inputMode="tel"
+                    />
+                  </label>
+                  <label>
+                    Email
+                    <input
+                      value={contactForm.email}
+                      onChange={(e) =>
+                        setContactForm((c) => ({
+                          ...c,
+                          email: e.target.value,
+                        }))
+                      }
+                      inputMode="email"
+                    />
+                  </label>
+                  <label>
+                    Company
+                    <input
+                      value={contactForm.company}
+                      onChange={(e) =>
+                        setContactForm((c) => ({
+                          ...c,
+                          company: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Role
+                    <input
+                      value={contactForm.role}
+                      onChange={(e) =>
+                        setContactForm((c) => ({
+                          ...c,
+                          role: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Project
+                    <select
+                      value={contactProjectId}
+                      onChange={(e) => setContactProjectId(e.target.value)}
+                    >
+                      <option value="">None</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <label>
+                  Notes
+                  <textarea
+                    value={contactNotes}
+                    onChange={(e) => setContactNotes(e.target.value)}
+                    rows={2}
+                  />
+                </label>
+                <button disabled={busy} onClick={() => void createContact()}>
+                  Save
+                </button>
+              </section>
+              <section className="panel">
+                <div className="panel-head">
+                  <h2>Directory</h2>
+                  <span className="muted">{filteredPeople.length}</span>
+                </div>
+                <input
+                  className="contact-search"
+                  value={contactSearch}
+                  onChange={(e) => setContactSearch(e.target.value)}
+                  placeholder="Filter…"
+                />
+                {filteredPeople.length === 0 ? (
+                  <p className="empty">No people yet.</p>
+                ) : (
+                  <div className="contact-grid">
+                    {filteredPeople.map((person) => (
+                      <ContactCard
+                        key={person.id}
+                        person={person}
+                        selected={selectedEntityId === person.id}
+                        onOpen={() => setSelectedEntityId(person.id)}
+                      />
+                    ))}
+                  </div>
                 )}
               </section>
-            </div>
-          </>
-        )}
+            </>
+          )}
 
-        {view === "contacts" && (
-          <>
-            <header className="page-header">
-              <h1>Contact Center</h1>
-              <p>
-                People you need on speed dial. Attach them to quests — when
-                you&apos;re in the thick of it, one click calls or emails.
-              </p>
-            </header>
-
-            <section className="panel">
-              <h2>Add contact</h2>
-              <div className="contact-form-grid">
-                <label>
-                  Name *
+          {view === "search" && (
+            <>
+              <header className="page-header">
+                <h1>Search</h1>
+              </header>
+              <section className="panel">
+                <div className="row">
                   <input
-                    value={contactName}
-                    onChange={(e) => setContactName(e.target.value)}
-                    placeholder="Who are they?"
+                    className="grow"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search…"
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") void createContact();
+                      if (e.key === "Enter") void runSearch();
                     }}
                   />
-                </label>
-                <label>
-                  Phone
-                  <input
-                    value={contactForm.phone}
-                    onChange={(e) =>
-                      setContactForm((c) => ({ ...c, phone: e.target.value }))
-                    }
-                    placeholder="+1 555 0100"
-                    inputMode="tel"
-                  />
-                </label>
-                <label>
-                  Email
-                  <input
-                    value={contactForm.email}
-                    onChange={(e) =>
-                      setContactForm((c) => ({ ...c, email: e.target.value }))
-                    }
-                    placeholder="name@example.com"
-                    inputMode="email"
-                  />
-                </label>
-                <label>
-                  Company
-                  <input
-                    value={contactForm.company}
-                    onChange={(e) =>
-                      setContactForm((c) => ({
-                        ...c,
-                        company: e.target.value,
-                      }))
-                    }
-                    placeholder="Org"
-                  />
-                </label>
-                <label>
-                  Role
-                  <input
-                    value={contactForm.role}
-                    onChange={(e) =>
-                      setContactForm((c) => ({ ...c, role: e.target.value }))
-                    }
-                    placeholder="How they help"
-                  />
-                </label>
-                <label>
-                  Attach to quest
-                  <select
-                    value={contactQuestId}
-                    onChange={(e) => setContactQuestId(e.target.value)}
-                  >
-                    <option value="">None yet</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.title}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <label>
-                Notes
-                <textarea
-                  value={contactNotes}
-                  onChange={(e) => setContactNotes(e.target.value)}
-                  rows={2}
-                  placeholder="Context, last talk, preference…"
-                />
-              </label>
-              <button disabled={busy} onClick={() => void createContact()}>
-                Save contact
-              </button>
-            </section>
-
-            <section className="panel">
-              <div className="panel-head">
-                <h2>Directory</h2>
-                <span className="muted">{filteredContacts.length}</span>
-              </div>
-              <input
-                className="contact-search"
-                value={contactSearch}
-                onChange={(e) => setContactSearch(e.target.value)}
-                placeholder="Filter by name, phone, email, company…"
-              />
-              {filteredContacts.length === 0 ? (
-                <p className="empty">
-                  No contacts yet. Add someone above — future-you will thank
-                  you.
-                </p>
-              ) : (
-                <div className="contact-grid">
-                  {filteredContacts.map((person) => (
-                    <ContactCard
-                      key={person.id}
-                      person={person}
-                      selected={selectedEntityId === person.id}
-                      onOpen={() => setSelectedEntityId(person.id)}
-                    />
-                  ))}
+                  <button disabled={busy} onClick={() => void runSearch()}>
+                    Search
+                  </button>
                 </div>
-              )}
-            </section>
-          </>
-        )}
+              </section>
+              <section className="panel">
+                <div className="panel-head">
+                  <h2>Results</h2>
+                  <span className="muted">{searchResults.length}</span>
+                </div>
+                {searchResults.length === 0 ? (
+                  <p className="empty">No results.</p>
+                ) : (
+                  <ul className="entity-list">
+                    {searchResults.map((e) =>
+                      renderRow(e, {
+                        showToggle: e.entityType === "task",
+                      }),
+                    )}
+                  </ul>
+                )}
+              </section>
+            </>
+          )}
 
-        {view === "search" && (
-          <>
-            <header className="page-header">
-              <h1>Search</h1>
-              <p>Full-text over titles and descriptions. (Cooler name TBD.)</p>
-            </header>
-
-            <section className="panel">
-              <div className="row">
-                <input
-                  className="grow"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search your brain…"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void runSearch();
-                  }}
-                />
-                <button disabled={busy} onClick={() => void runSearch()}>
-                  Search
-                </button>
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="panel-head">
-                <h2>Results</h2>
-                <span className="muted">{searchResults.length}</span>
-              </div>
-              {searchResults.length === 0 ? (
-                <p className="empty">No results yet.</p>
-              ) : (
-                <ul className="entity-list">
-                  {searchResults.map((e) =>
-                    renderEntityRow(e, {
-                      showToggle: e.entityType === "task",
-                    }),
-                  )}
-                </ul>
-              )}
-            </section>
-          </>
-        )}
-
-        {view === "backups" && (
-          <>
-            <header className="page-header">
-              <h1>Backups</h1>
-              <p>
-                Local snapshots of <code>workspace.db</code>. Auto on open; last
-                10 kept. (Still looking for a cooler name.)
-              </p>
-            </header>
-
-            <section className="panel">
-              <div className="row">
-                <button disabled={busy} onClick={() => void createBackupNow()}>
-                  Create backup now
-                </button>
-                <button
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() => void refreshBackups()}
-                >
-                  Refresh list
-                </button>
-              </div>
-              <p className="muted">
-                Restore replaces the live database. A safety backup is written
-                first.
-              </p>
-            </section>
-
-            <section className="panel">
-              <div className="panel-head">
-                <h2>Snapshots</h2>
-                <span className="muted">{backups.length}</span>
-              </div>
-              {backups.length === 0 ? (
-                <p className="empty">
-                  No backups yet. Open the workspace again or create one now.
+          {view === "backups" && (
+            <>
+              <header className="page-header">
+                <h1>Backups</h1>
+                <p>
+                  Copies of your database. Automatic when you open a workspace;
+                  keeps the last 10.
                 </p>
-              ) : (
-                <ul className="backup-list">
-                  {backups.map((b) => (
-                    <li key={b.path}>
-                      <div>
-                        <strong>{b.fileName}</strong>
-                        <small className="muted">
-                          {formatWhen(b.createdAt)} ·{" "}
-                          {(b.sizeBytes / 1024).toFixed(1)} KB
-                        </small>
-                      </div>
-                      <button
-                        className="secondary small"
-                        disabled={busy}
-                        onClick={() => void restoreBackup(b)}
-                      >
-                        Restore
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          </>
-        )}
-      </main>
+              </header>
+              <section className="panel">
+                <div className="row">
+                  <button
+                    disabled={busy}
+                    onClick={() => void createBackupNow()}
+                  >
+                    Backup now
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => void refreshBackups()}
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </section>
+              <section className="panel">
+                <div className="panel-head">
+                  <h2>Snapshots</h2>
+                  <span className="muted">{backups.length}</span>
+                </div>
+                {backups.length === 0 ? (
+                  <p className="empty">No backups yet.</p>
+                ) : (
+                  <ul className="backup-list">
+                    {backups.map((b) => (
+                      <li key={b.path}>
+                        <div>
+                          <strong>{b.fileName}</strong>
+                          <small className="muted">
+                            {formatWhen(b.createdAt)} ·{" "}
+                            {(b.sizeBytes / 1024).toFixed(1)} KB
+                          </small>
+                        </div>
+                        <button
+                          className="secondary small"
+                          disabled={busy}
+                          onClick={() => void restoreBackup(b)}
+                        >
+                          Restore
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </>
+          )}
+        </main>
+      </div>
 
       {selectedEntityId && (
         <EntityDetail

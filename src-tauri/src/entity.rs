@@ -52,6 +52,7 @@ pub struct UpdateEntityInput {
     pub description: Option<String>,
     pub metadata: Option<serde_json::Value>,
     pub archived: Option<bool>,
+    pub entity_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,6 +218,13 @@ pub fn update_entity(state: &AppState, input: UpdateEntityInput) -> AppResult<En
             .clone()
             .unwrap_or_else(|| existing.metadata.clone());
         let archived = input.archived.unwrap_or(existing.archived);
+        let entity_type = if let Some(ref t) = input.entity_type {
+            let t = t.trim().to_lowercase();
+            validate_entity_type(&t)?;
+            t
+        } else {
+            existing.entity_type.clone()
+        };
         let ts = now();
         let metadata_raw = serde_json::to_string(&metadata)?;
 
@@ -228,8 +236,9 @@ pub fn update_entity(state: &AppState, input: UpdateEntityInput) -> AppResult<En
                 metadata = ?3,
                 updated_at = ?4,
                 version = version + 1,
-                archived = ?5
-            WHERE id = ?6
+                archived = ?5,
+                entity_type = ?6
+            WHERE id = ?7
             "#,
             params![
                 title,
@@ -237,6 +246,7 @@ pub fn update_entity(state: &AppState, input: UpdateEntityInput) -> AppResult<En
                 metadata_raw,
                 ts,
                 if archived { 1 } else { 0 },
+                entity_type,
                 input.id
             ],
         )?;
@@ -249,6 +259,9 @@ pub fn update_entity(state: &AppState, input: UpdateEntityInput) -> AppResult<En
         } else if !archived && existing.archived {
             summary = format!("Restored: {title}");
             event_type = "entity.restored";
+        } else if entity_type != existing.entity_type {
+            summary = format!("Sorted as {entity_type}: {title}");
+            event_type = "entity.sorted";
         } else if title != existing.title {
             summary = format!("Renamed to: {title}");
         } else if description != existing.description {
