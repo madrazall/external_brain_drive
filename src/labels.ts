@@ -55,3 +55,12 @@ export const SORT_TYPES: { value: EntityType; label: string }[] = [
   { value: "project", label: "Project" },
   { value: "person", label: "Person" },
 ];
+
+/** All types — for reclassifying an existing item. */
+export const ALL_TYPES: { value: EntityType; label: string }[] = [
+  { value: "inbox", label: "Thought" },
+  { value: "note", label: "Note" },
+  { value: "task", label: "Task" },
+  { value: "project", label: "Project" },
+  { value: "person", label: "Person" },
+];

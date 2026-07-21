@@ -712,6 +712,10 @@ a.reach-btn.primary {
   margin-bottom: 0.9rem;
 }
 
+.detail-panel select.type-change {
+  font-weight: 600;
+}
+
 .detail-panel textarea {
   resize: vertical;
   min-height: 140px;

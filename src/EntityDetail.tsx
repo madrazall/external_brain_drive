@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import {
+  ALL_TYPES,
   readContact,
   typeLabel,
   withContactMeta,
   type ContactInfo,
 } from "./labels";
-import type { Entity, EntityContext, TimelineEvent } from "./types";
+import type { Entity, EntityContext, EntityType, TimelineEvent } from "./types";
 
 function formatWhen(iso: string): string {
   try {
@@ -192,6 +193,30 @@ export function EntityDetail({
     }
   };
 
+  const changeType = async (nextType: EntityType) => {
+    if (!entity || nextType === entity.entityType) return;
+    setBusy(true);
+    try {
+      // Persist any pending edits with the type change so nothing is lost.
+      const updated = await api.entityUpdate({
+        id: entity.id,
+        title: title.trim() || entity.title,
+        description,
+        entityType: nextType,
+        metadata:
+          nextType === "person" || entity.entityType === "person"
+            ? withContactMeta(entity.metadata, contact)
+            : entity.metadata,
+      });
+      onChanged(updated);
+      await load(entity.id);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const linkToProject = async () => {
     if (!entity || !linkProjectId) return;
     setBusy(true);
@@ -275,6 +300,25 @@ export function EntityDetail({
         <p className="empty">Loading…</p>
       ) : (
         <>
+          <label>
+            Type
+            <select
+              className="type-change"
+              value={entity.entityType}
+              disabled={busy}
+              onChange={(e) =>
+                void changeType(e.target.value as EntityType)
+              }
+              aria-label="Change type"
+            >
+              {ALL_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label>
             {entity.entityType === "person" ? "Name" : "Title"}
             <input
