@@ -737,10 +737,10 @@ function App() {
           {view === "home" && (
             <>
               <header className="page-header">
-                <h1>Thoughts</h1>
+                <h1>Thoughts_</h1>
                 <p>
-                  Unsorted stuff lands here. Click to open, or sort with one
-                  tap. Press <kbd>/</kbd> anytime to capture.
+                  Unsorted stuff lands here. Sort with one tap, or open for
+                  details. Press <kbd>/</kbd> to capture anytime.
                 </p>
               </header>
 
@@ -749,15 +749,12 @@ function App() {
                   <h2>Pool</h2>
                   <span className="muted">
                     {thoughts.length === 0
-                      ? "empty — good"
+                      ? "clear"
                       : `${thoughts.length} waiting`}
                   </span>
                 </div>
                 {thoughts.length === 0 ? (
-                  <p className="empty">
-                    Nothing waiting. Use the bar at the top when something pops
-                    into your head.
-                  </p>
+                  <p className="empty">No thoughts in pool</p>
                 ) : (
                   <ul className="thought-list">
                     {thoughts.map((t) => (
