@@ -12,11 +12,15 @@
   "app": {
     "windows": [
       {
-        "title": "External Brain Drive",
-        "width": 1100,
-        "height": 720,
-        "minWidth": 800,
-        "minHeight": 560
+        "title": "Brain Drive",
+        "width": 400,
+        "height": 640,
+        "minWidth": 340,
+        "minHeight": 420,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "decorations": true,
+        "visible": true
       }
     ],
     "security": {

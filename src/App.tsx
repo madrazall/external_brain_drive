@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import { ContactCard } from "./ContactCard";
@@ -92,8 +93,32 @@ function App() {
   const [contactProjectId, setContactProjectId] = useState("");
   const [contactSearch, setContactSearch] = useState("");
   const [attachPersonId, setAttachPersonId] = useState("");
+  const [alwaysOnTop, setAlwaysOnTop] = useState(true);
 
   const quickRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const win = getCurrentWindow();
+        const onTop = await win.isAlwaysOnTop();
+        setAlwaysOnTop(onTop);
+      } catch {
+        // browser preview without Tauri
+      }
+    })();
+  }, []);
+
+  const toggleAlwaysOnTop = async () => {
+    try {
+      const win = getCurrentWindow();
+      const next = !alwaysOnTop;
+      await win.setAlwaysOnTop(next);
+      setAlwaysOnTop(next);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
 
   const refreshLists = useCallback(async () => {
     const [all, projectList, peopleList, badges] = await Promise.all([
@@ -653,16 +678,23 @@ function App() {
   }
 
   return (
-    <div className={selectedEntityId ? "shell app with-detail" : "shell app"}>
-      <aside className="sidebar">
-        <div className="brand">
-          <strong>BRAIN_DRIVE_</strong>
-          <span>{workspace.name || "system active"}</span>
+    <div
+      className={
+        selectedEntityId ? "shell app compact with-detail" : "shell app compact"
+      }
+    >
+      <header className="topbar">
+        <div className="brand compact-brand">
+          <strong>BRAIN_</strong>
+          <span className="ws-name" title={workspace.path}>
+            {workspace.name}
+          </span>
         </div>
-        <nav>
+        <nav className="topnav">
           <button
             className={view === "home" ? "nav active" : "nav"}
             onClick={() => setView("home")}
+            title="Home"
           >
             Home
             {thoughts.length > 0 && (
@@ -672,45 +704,45 @@ function App() {
           <button
             className={view === "projects" ? "nav active" : "nav"}
             onClick={() => setView("projects")}
+            title="Projects"
           >
-            Projects
+            Proj
           </button>
           <button
             className={view === "people" ? "nav active" : "nav"}
             onClick={() => setView("people")}
+            title="People"
           >
             People
           </button>
           <button
             className={view === "search" ? "nav active" : "nav"}
             onClick={() => setView("search")}
+            title="Search"
           >
-            Search
+            Find
           </button>
           <button
             className={view === "backups" ? "nav active" : "nav"}
             onClick={() => setView("backups")}
+            title="Backups"
           >
-            Backups
+            Bak
           </button>
         </nav>
-        <div className="sidebar-stats muted">
-          <span>{thoughts.length} unsorted</span>
-          <span>{openTasks.length} open tasks</span>
-        </div>
-        <div className="sidebar-foot">
-          <p className="muted path" title={workspace.path}>
-            {workspace.path}
-          </p>
+        <div className="topbar-actions">
           <button
-            className="secondary small"
-            disabled={busy}
-            onClick={() => void createBackupNow()}
+            type="button"
+            className={alwaysOnTop ? "pin-btn active" : "pin-btn"}
+            title={alwaysOnTop ? "Unpin (always on top off)" : "Pin on top"}
+            onClick={() => void toggleAlwaysOnTop()}
           >
-            Backup now
+            {alwaysOnTop ? "PIN" : "pin"}
           </button>
           <button
-            className="secondary small"
+            type="button"
+            className="pin-btn"
+            title="Switch workspace"
             onClick={() => {
               setWorkspace(null);
               setEntities([]);
@@ -720,10 +752,10 @@ function App() {
               setView("home");
             }}
           >
-            Switch workspace
+            ⋯
           </button>
         </div>
-      </aside>
+      </header>
 
       <div className="main-column">
         {quickBar}
@@ -736,11 +768,11 @@ function App() {
 
           {view === "home" && (
             <>
-              <header className="page-header">
+              <header className="page-header compact-header">
                 <h1>Thoughts_</h1>
                 <p>
-                  Unsorted stuff lands here. Sort with one tap, or open for
-                  details. Press <kbd>/</kbd> to capture anytime.
+                  {thoughts.length} unsorted · {openTasks.length} tasks ·{" "}
+                  <kbd>/</kbd> capture
                 </p>
               </header>
 
