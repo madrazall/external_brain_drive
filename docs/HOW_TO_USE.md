@@ -84,9 +84,17 @@ Also: **PIN** (always on top), **⋯** (switch workspace).
 - **Dismiss** — archives without sorting  
 - Click the title — open overview panel  
 
-### Open tasks
-- Tasks not marked done  
+### Focus (open tasks)
+- Home only shows a small **focus** set (about 5 tasks), not your entire backlog  
+- **Automatic ranking** (no daily triage required):
+  - ★ **Pinned** always on top (star on the row or in task overview)
+  - Recently **touched** (opened / edited / status) stays hot  
+  - Linked to a **project** ranks above free-floating tasks  
+  - Brand-new tasks surface briefly, then fall if you ignore them  
+- Everything else sits under **“N more open tasks”** (dimmed when expanded)  
 - Checkbox marks done/open  
+- **Pin sparingly** — the point is a working set, not ranking everything  
+
 
 ### Recent
 - Non-thought items you touched lately  

@@ -124,7 +124,8 @@ Prioritized for real daily use (not the full TBD platform):
 2. **Drag-drop** files into Docs or onto a project
 3. **Global hotkey** for capture (even when unfocused)
 4. **Richer notes** (Markdown preview or simple formatting)
-5. **Empty / first-run** polish and in-app tips
+5. **Due dates** (optional) as an extra focus signal — not required for ranking
+6. **Empty / first-run** polish and in-app tips
 
 ### Trust & quality
 6. Export workspace (zip folder) / import

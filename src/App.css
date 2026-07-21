@@ -612,6 +612,74 @@ button.pin-btn:hover:not(:disabled) {
   color: var(--ok);
 }
 
+.task-pin {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  margin: 0.5rem 0;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-2);
+  font-size: 0.85rem;
+  line-height: 1;
+  min-height: 1.5rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.task-pin.active {
+  color: var(--task);
+}
+
+.task-pin:hover:not(:disabled) {
+  color: var(--task);
+  background: transparent;
+}
+
+.entity-row-wrap.dimmed {
+  opacity: 0.38;
+}
+
+.entity-row-wrap.dimmed:hover {
+  opacity: 0.72;
+}
+
+.focus-hint {
+  margin: 0 0 0.45rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+}
+
+.task-backlog {
+  margin-top: 0.45rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border);
+}
+
+button.backlog-toggle {
+  width: 100%;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  padding: 0.35rem 0.45rem;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+button.backlog-toggle:hover:not(:disabled) {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.backlog-list {
+  margin-top: 0.35rem;
+}
+
 .chip-row {
   display: flex;
   flex-wrap: wrap;

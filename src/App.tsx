@@ -66,6 +66,50 @@ function isTaskDone(entity: Entity): boolean {
   return entity.metadata?.status === "done";
 }
 
+function isTaskPinned(entity: Entity): boolean {
+  return entity.metadata?.pinned === true;
+}
+
+/** Working-set size on Home — keep tiny so capture volume doesn't drown you. */
+const FOCUS_TASK_LIMIT = 5;
+
+/**
+ * Automatic importance for open tasks (no daily triage required):
+ * - Pinned always wins (rare manual signal)
+ * - Recently touched stays hot
+ * - Linked to a project beats free-floating backlog
+ * - Brand-new tasks get a short boost, then fall away if ignored
+ */
+function scoreOpenTask(
+  entity: Entity,
+  badges: LinkBadge[] | undefined,
+  nowMs: number,
+): number {
+  let score = 0;
+  if (isTaskPinned(entity)) score += 10_000;
+
+  const updated = new Date(entity.updatedAt).getTime();
+  const created = new Date(entity.createdAt).getTime();
+  const hoursSinceUpdate = Math.max(0, (nowMs - updated) / 3_600_000);
+  const hoursSinceCreate = Math.max(0, (nowMs - created) / 3_600_000);
+
+  // Recency of touch (opens/edits/status) — strongest automatic signal
+  score += Math.max(0, 500 - hoursSinceUpdate * 8);
+
+  // Linked to a project = already has a home / context
+  const hasProject = badges?.some(
+    (b) => b.direction === "parent" && b.kind === "project",
+  );
+  if (hasProject) score += 120;
+
+  // New tasks surface briefly, then drop unless touched or pinned
+  if (hoursSinceCreate < 24) score += 40;
+  else if (hoursSinceCreate < 72) score += 15;
+
+  // Slight title-length neutrality — no-op, kept for future priority field
+  return score;
+}
+
 const emptyContactForm = (): ContactInfo => ({
   phone: "",
   email: "",
@@ -99,6 +143,7 @@ function App() {
   const [docProjectId, setDocProjectId] = useState("");
   const [attachDocId, setAttachDocId] = useState("");
   const [archivedItems, setArchivedItems] = useState<Entity[]>([]);
+  const [showTaskBacklog, setShowTaskBacklog] = useState(false);
 
   const [contactName, setContactName] = useState("");
   const [contactForm, setContactForm] = useState<ContactInfo>(emptyContactForm());
@@ -460,6 +505,25 @@ function App() {
     }
   };
 
+  const toggleTaskPin = async (entity: Entity, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (entity.entityType !== "task") return;
+    setBusy(true);
+    try {
+      const pinned = !isTaskPinned(entity);
+      await api.entityUpdate({
+        id: entity.id,
+        metadata: { ...entity.metadata, pinned },
+      });
+      await refreshLists();
+      showStatus(pinned ? `Pinned: ${entity.title}` : `Unpinned: ${entity.title}`);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const attachContactToProject = async () => {
     if (!selectedProjectId || !attachPersonId) return;
     setBusy(true);
@@ -613,9 +677,26 @@ function App() {
     [entities],
   );
 
-  const openTasks = useMemo(
-    () => entities.filter((e) => e.entityType === "task" && !isTaskDone(e)),
-    [entities],
+  const openTasks = useMemo(() => {
+    const nowMs = Date.now();
+    return entities
+      .filter((e) => e.entityType === "task" && !isTaskDone(e))
+      .map((e) => ({
+        entity: e,
+        score: scoreOpenTask(e, badgeMap[e.id], nowMs),
+      }))
+      .sort((a, b) => b.score - a.score || b.entity.updatedAt.localeCompare(a.entity.updatedAt))
+      .map((x) => x.entity);
+  }, [entities, badgeMap]);
+
+  const focusTasks = useMemo(
+    () => openTasks.slice(0, FOCUS_TASK_LIMIT),
+    [openTasks],
+  );
+
+  const backlogTasks = useMemo(
+    () => openTasks.slice(FOCUS_TASK_LIMIT),
+    [openTasks],
   );
 
   const recentItems = useMemo(
@@ -689,16 +770,22 @@ function App() {
     );
   };
 
-  const renderRow = (e: Entity, opts?: { showToggle?: boolean }) => {
+  const renderRow = (
+    e: Entity,
+    opts?: { showToggle?: boolean; dimmed?: boolean; showPin?: boolean },
+  ) => {
     const done = e.entityType === "task" && isTaskDone(e);
+    const pinned = e.entityType === "task" && isTaskPinned(e);
     return (
       <li key={e.id}>
         <div
-          className={
-            selectedEntityId === e.id
-              ? "entity-row-wrap selected"
-              : "entity-row-wrap"
-          }
+          className={[
+            "entity-row-wrap",
+            selectedEntityId === e.id ? "selected" : "",
+            opts?.dimmed ? "dimmed" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
         >
           {opts?.showToggle && e.entityType === "task" && (
             <button
@@ -709,6 +796,18 @@ function App() {
               aria-label={done ? "Mark open" : "Mark done"}
             >
               {done ? "✓" : ""}
+            </button>
+          )}
+          {opts?.showPin && e.entityType === "task" && (
+            <button
+              type="button"
+              className={pinned ? "task-pin active" : "task-pin"}
+              disabled={busy}
+              onClick={(ev) => void toggleTaskPin(e, ev)}
+              title={pinned ? "Unpin from focus" : "Pin to focus"}
+              aria-label={pinned ? "Unpin" : "Pin"}
+            >
+              {pinned ? "★" : "☆"}
             </button>
           )}
           <button
@@ -722,7 +821,10 @@ function App() {
               {typeLabel(e.entityType)}
             </span>
             <div className="entity-row-body">
-              <strong className={done ? "done" : undefined}>{e.title}</strong>
+              <strong className={done ? "done" : undefined}>
+                {pinned ? "★ " : ""}
+                {e.title}
+              </strong>
               {e.description && <p>{e.description}</p>}
               {renderLinkBadges(e.id)}
               <small className="muted">{formatRelative(e.updatedAt)}</small>
@@ -999,14 +1101,47 @@ function App() {
               {openTasks.length > 0 && (
                 <section className="panel">
                   <div className="panel-head">
-                    <h2>Open tasks</h2>
-                    <span className="muted">{openTasks.length}</span>
+                    <h2>Focus</h2>
+                    <span className="muted">
+                      {focusTasks.length}
+                      {backlogTasks.length > 0
+                        ? ` / ${openTasks.length}`
+                        : ""}
+                    </span>
                   </div>
+                  <p className="focus-hint muted">
+                    Auto: recent + project-linked. ★ pins to stay on top —
+                    ignore the rest until you need them.
+                  </p>
                   <ul className="entity-list">
-                    {openTasks.map((e) =>
-                      renderRow(e, { showToggle: true }),
+                    {focusTasks.map((e) =>
+                      renderRow(e, { showToggle: true, showPin: true }),
                     )}
                   </ul>
+                  {backlogTasks.length > 0 && (
+                    <div className="task-backlog">
+                      <button
+                        type="button"
+                        className="backlog-toggle"
+                        onClick={() => setShowTaskBacklog((v) => !v)}
+                      >
+                        {showTaskBacklog
+                          ? "Hide backlog"
+                          : `${backlogTasks.length} more open tasks`}
+                      </button>
+                      {showTaskBacklog && (
+                        <ul className="entity-list backlog-list">
+                          {backlogTasks.map((e) =>
+                            renderRow(e, {
+                              showToggle: true,
+                              showPin: true,
+                              dimmed: true,
+                            }),
+                          )}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                 </section>
               )}
 

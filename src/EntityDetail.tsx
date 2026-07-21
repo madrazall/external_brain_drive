@@ -28,6 +28,10 @@ function isTaskDone(entity: Entity): boolean {
   return entity.metadata?.status === "done";
 }
 
+function isTaskPinned(entity: Entity): boolean {
+  return entity.metadata?.pinned === true;
+}
+
 interface EntityDetailProps {
   entityId: string;
   projects: Entity[];
@@ -222,6 +226,24 @@ export function EntityDetail({
       const updated = await api.entityUpdate({
         id: entity.id,
         metadata: { ...entity.metadata, status: nextStatus },
+      });
+      onChanged(updated);
+      await load(entity.id, editing);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleTaskPin = async () => {
+    if (!entity || entity.entityType !== "task") return;
+    setBusy(true);
+    try {
+      const pinned = !isTaskPinned(entity);
+      const updated = await api.entityUpdate({
+        id: entity.id,
+        metadata: { ...entity.metadata, pinned },
       });
       onChanged(updated);
       await load(entity.id, editing);
@@ -691,6 +713,13 @@ export function EntityDetail({
                 onClick={() => void toggleTaskDone()}
               >
                 {isTaskDone(entity) ? "Mark open" : "Mark done"}
+              </button>
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => void toggleTaskPin()}
+              >
+                {isTaskPinned(entity) ? "Unpin from focus" : "Pin to focus"}
               </button>
             </div>
           )}
