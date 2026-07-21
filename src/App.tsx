@@ -7,28 +7,26 @@ import {
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
+import { ContactCard } from "./ContactCard";
 import { EntityDetail } from "./EntityDetail";
+import {
+  CAPTURE_TYPES,
+  FILTER_CHIPS,
+  readContact,
+  typeLabel,
+  withContactMeta,
+  type ContactInfo,
+} from "./labels";
 import type { BackupInfo, Entity, EntityType, WorkspaceInfo } from "./types";
 import "./App.css";
 
-type View = "focus" | "inbox" | "projects" | "search" | "backups";
-
-const CAPTURE_TYPES: { value: EntityType; label: string }[] = [
-  { value: "note", label: "Note" },
-  { value: "task", label: "Task" },
-  { value: "project", label: "Proj" },
-  { value: "person", label: "Person" },
-  { value: "inbox", label: "Dump" },
-];
-
-const FILTER_CHIPS: { value: "all" | EntityType; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "note", label: "Notes" },
-  { value: "task", label: "Tasks" },
-  { value: "person", label: "People" },
-  { value: "inbox", label: "Dumps" },
-  { value: "project", label: "Projects" },
-];
+type View =
+  | "focus"
+  | "inbox"
+  | "projects"
+  | "contacts"
+  | "search"
+  | "backups";
 
 function formatWhen(iso: string): string {
   try {
@@ -55,19 +53,23 @@ function formatRelative(iso: string): string {
   }
 }
 
-function typeBadge(type: string): string {
-  return type.charAt(0).toUpperCase() + type.slice(1);
-}
-
 function isTaskDone(entity: Entity): boolean {
   return entity.metadata?.status === "done";
 }
+
+const emptyContactForm = (): ContactInfo => ({
+  phone: "",
+  email: "",
+  company: "",
+  role: "",
+});
 
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [projects, setProjects] = useState<Entity[]>([]);
+  const [people, setPeople] = useState<Entity[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null,
   );
@@ -89,15 +91,25 @@ function App() {
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
+  // Contact Center form
+  const [contactName, setContactName] = useState("");
+  const [contactForm, setContactForm] = useState<ContactInfo>(emptyContactForm());
+  const [contactNotes, setContactNotes] = useState("");
+  const [contactQuestId, setContactQuestId] = useState("");
+  const [contactSearch, setContactSearch] = useState("");
+  const [attachPersonId, setAttachPersonId] = useState("");
+
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   const refreshLists = useCallback(async () => {
-    const [all, projectList] = await Promise.all([
-      api.entityList(undefined, 200),
+    const [all, projectList, peopleList] = await Promise.all([
+      api.entityList(undefined, 300),
       api.entityList("project", 100),
+      api.entityList("person", 300),
     ]);
     setEntities(all);
     setProjects(projectList);
+    setPeople(peopleList);
   }, []);
 
   const refreshBackups = useCallback(async () => {
@@ -161,7 +173,6 @@ function App() {
     }
   }, [view, workspace, refreshBackups]);
 
-  // Escape closes detail panel
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && selectedEntityId) {
@@ -172,7 +183,6 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedEntityId]);
 
-  // Focus capture field when entering capture-related views
   useEffect(() => {
     if (workspace && (view === "focus" || view === "inbox")) {
       const t = window.setTimeout(() => titleInputRef.current?.focus(), 50);
@@ -180,13 +190,10 @@ function App() {
     }
   }, [workspace, view]);
 
-  const enterWorkspace = async (
-    info: WorkspaceInfo,
-    nextView: View = "focus",
-  ) => {
+  const enterWorkspace = async (info: WorkspaceInfo) => {
     setWorkspace(info);
     setSelectedEntityId(null);
-    setView(nextView);
+    setView("focus");
     await refreshLists();
     await loadRecent();
   };
@@ -258,8 +265,37 @@ function App() {
       setCaptureBody("");
       await refreshLists();
       setSelectedEntityId(created.id);
-      showStatus(`Captured ${typeBadge(created.entityType)}: ${created.title}`);
+      showStatus(`Got it — ${typeLabel(created.entityType)}: ${created.title}`);
       window.setTimeout(() => titleInputRef.current?.focus(), 30);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createContact = async () => {
+    if (!contactName.trim()) {
+      setError("Contact name is required.");
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      const created = await api.entityCreate({
+        entityType: "person",
+        title: contactName.trim(),
+        description: contactNotes.trim(),
+        metadata: withContactMeta({}, contactForm),
+        projectId: contactQuestId || undefined,
+      });
+      setContactName("");
+      setContactForm(emptyContactForm());
+      setContactNotes("");
+      setContactQuestId("");
+      await refreshLists();
+      setSelectedEntityId(created.id);
+      showStatus(`Contact saved: ${created.title}`);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -335,8 +371,45 @@ function App() {
     }
   };
 
+  const attachContactToQuest = async () => {
+    if (!selectedProjectId || !attachPersonId) return;
+    setBusy(true);
+    try {
+      await api.entityLink(selectedProjectId, attachPersonId, "contains");
+      setAttachPersonId("");
+      setProjectEntities(await api.projectListEntities(selectedProjectId));
+      await refreshLists();
+      showStatus("Contact attached to quest");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const detachContactFromQuest = async (personId: string) => {
+    if (!selectedProjectId) return;
+    setBusy(true);
+    try {
+      await api.entityUnlink(selectedProjectId, personId, "contains");
+      setProjectEntities(await api.projectListEntities(selectedProjectId));
+      await refreshLists();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleEntityChanged = async () => {
     await refreshLists();
+    if (selectedProjectId) {
+      try {
+        setProjectEntities(await api.projectListEntities(selectedProjectId));
+      } catch {
+        // ignore
+      }
+    }
     if (searchQuery.trim()) {
       try {
         setSearchResults(await api.entitySearch(searchQuery));
@@ -347,8 +420,7 @@ function App() {
   };
 
   const openTasks = useMemo(
-    () =>
-      entities.filter((e) => e.entityType === "task" && !isTaskDone(e)),
+    () => entities.filter((e) => e.entityType === "task" && !isTaskDone(e)),
     [entities],
   );
 
@@ -362,29 +434,53 @@ function App() {
   }, [entities]);
 
   const inboxItems = useMemo(() => {
-    let list = entities;
     if (inboxFilter === "all") {
-      list = entities.filter((e) => e.entityType !== "project");
-    } else {
-      list = entities.filter((e) => e.entityType === inboxFilter);
+      return entities.filter((e) => e.entityType !== "project");
     }
-    return list;
+    return entities.filter((e) => e.entityType === inboxFilter);
   }, [entities, inboxFilter]);
 
-  const stats = useMemo(() => {
-    const notes = entities.filter((e) => e.entityType === "note").length;
-    const tasksOpen = openTasks.length;
-    const tasksDone = entities.filter(
-      (e) => e.entityType === "task" && isTaskDone(e),
-    ).length;
-    return {
+  const questCrew = useMemo(
+    () => projectEntities.filter((e) => e.entityType === "person"),
+    [projectEntities],
+  );
+
+  const questWork = useMemo(
+    () => projectEntities.filter((e) => e.entityType !== "person"),
+    [projectEntities],
+  );
+
+  const filteredContacts = useMemo(() => {
+    const q = contactSearch.trim().toLowerCase();
+    if (!q) return people;
+    return people.filter((p) => {
+      const c = readContact(p);
+      const hay = [
+        p.title,
+        p.description,
+        c.phone,
+        c.email,
+        c.company,
+        c.role,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [people, contactSearch]);
+
+  /** Map person id → quests they belong to (from currently loaded project memberships is incomplete).
+   *  We approximate via each person's containing projects when detail loads;
+   *  for list, show nothing unless we fetch — skip per-person quests for list speed. */
+  const stats = useMemo(
+    () => ({
       total: entities.length,
-      notes,
-      tasksOpen,
-      tasksDone,
-      projects: projects.length,
-    };
-  }, [entities, openTasks.length, projects.length]);
+      tasksOpen: openTasks.length,
+      contacts: people.length,
+      quests: projects.length,
+    }),
+    [entities.length, openTasks.length, people.length, projects.length],
+  );
 
   const renderEntityRow = (e: Entity, opts?: { showToggle?: boolean }) => {
     const done = e.entityType === "task" && isTaskDone(e);
@@ -412,18 +508,23 @@ function App() {
           <button
             type="button"
             className={
-              selectedEntityId === e.id
-                ? "entity-row selected"
-                : "entity-row"
+              selectedEntityId === e.id ? "entity-row selected" : "entity-row"
             }
             onClick={() => setSelectedEntityId(e.id)}
           >
             <span className={`badge type-${e.entityType}`}>
-              {typeBadge(e.entityType)}
+              {typeLabel(e.entityType)}
             </span>
             <div className="entity-row-body">
               <strong className={done ? "done" : undefined}>{e.title}</strong>
               {e.description && <p>{e.description}</p>}
+              {e.entityType === "person" && (() => {
+                const c = readContact(e);
+                const bits = [c.phone, c.email].filter(Boolean);
+                return bits.length ? (
+                  <p className="contact-line">{bits.join(" · ")}</p>
+                ) : null;
+              })()}
               <small className="muted">{formatRelative(e.updatedAt)}</small>
             </div>
           </button>
@@ -439,7 +540,7 @@ function App() {
           className="type-select"
           value={captureType}
           onChange={(e) => setCaptureType(e.target.value as EntityType)}
-          aria-label="Entity type"
+          aria-label="Type"
           title={CAPTURE_TYPES.find((t) => t.value === captureType)?.label}
         >
           {CAPTURE_TYPES.map((t) => (
@@ -453,7 +554,7 @@ function App() {
           className="title-input"
           value={captureTitle}
           onChange={(e) => setCaptureTitle(e.target.value)}
-          placeholder="What's on your mind? (Enter to capture)"
+          placeholder="Drop it here — Enter to save"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -465,7 +566,7 @@ function App() {
       <textarea
         value={captureBody}
         onChange={(e) => setCaptureBody(e.target.value)}
-        placeholder="Optional details… (Shift+Enter for newline in title is n/a; use this field)"
+        placeholder="Optional details…"
         rows={2}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -480,7 +581,7 @@ function App() {
           value={captureProjectId}
           onChange={(e) => setCaptureProjectId(e.target.value)}
         >
-          <option value="">No project</option>
+          <option value="">No quest</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.title}
@@ -488,7 +589,7 @@ function App() {
           ))}
         </select>
         <button disabled={busy} onClick={() => void capture()}>
-          Capture
+          Get This
         </button>
       </div>
     </section>
@@ -501,8 +602,8 @@ function App() {
           <p className="eyebrow">External Brain Drive</p>
           <h1>Your local-first external brain</h1>
           <p className="lede">
-            One trusted home for projects, notes, tasks, people, and decisions —
-            stored on your machine, searchable offline.
+            Capture chaos, run quests, reach people fast — all offline, on your
+            machine.
           </p>
 
           {error && <div className="banner error">{error}</div>}
@@ -570,19 +671,25 @@ function App() {
             className={view === "focus" ? "nav active" : "nav"}
             onClick={() => setView("focus")}
           >
-            Daily Focus
+            Right Now
           </button>
           <button
             className={view === "inbox" ? "nav active" : "nav"}
             onClick={() => setView("inbox")}
           >
-            Capture
+            Get This
           </button>
           <button
             className={view === "projects" ? "nav active" : "nav"}
             onClick={() => setView("projects")}
           >
-            Projects
+            Quests
+          </button>
+          <button
+            className={view === "contacts" ? "nav active" : "nav"}
+            onClick={() => setView("contacts")}
+          >
+            Contact Center
           </button>
           <button
             className={view === "search" ? "nav active" : "nav"}
@@ -599,7 +706,8 @@ function App() {
         </nav>
         <div className="sidebar-stats muted">
           <span>{stats.tasksOpen} open tasks</span>
-          <span>{stats.total} entities</span>
+          <span>{stats.contacts} contacts</span>
+          <span>{stats.quests} quests</span>
         </div>
         <div className="sidebar-foot">
           <p className="muted path" title={workspace.path}>
@@ -618,6 +726,7 @@ function App() {
               setWorkspace(null);
               setEntities([]);
               setProjects([]);
+              setPeople([]);
               setSelectedEntityId(null);
               setBackups([]);
               setStatusMessage(null);
@@ -638,10 +747,10 @@ function App() {
         {view === "focus" && (
           <>
             <header className="page-header">
-              <h1>Daily Focus</h1>
+              <h1>Right Now</h1>
               <p>
-                Open tasks and what you touched recently. Capture below — press{" "}
-                <kbd>Enter</kbd> to save.
+                Open tasks and what you just touched. Dump chaos below —{" "}
+                <kbd>Enter</kbd> locks it in.
               </p>
             </header>
 
@@ -655,8 +764,8 @@ function App() {
                 </div>
                 {openTasks.length === 0 ? (
                   <p className="empty">
-                    No open tasks. Capture type <strong>Task</strong> to add
-                    one.
+                    Nothing on fire. Capture a <strong>Task</strong> when
+                    something is.
                   </p>
                 ) : (
                   <ul className="entity-list">
@@ -673,11 +782,13 @@ function App() {
                   <span className="muted">{recentlyTouched.length}</span>
                 </div>
                 {recentlyTouched.length === 0 ? (
-                  <p className="empty">Nothing yet — capture something.</p>
+                  <p className="empty">Blank slate. Get something in.</p>
                 ) : (
                   <ul className="entity-list">
                     {recentlyTouched.map((e) =>
-                      renderEntityRow(e, { showToggle: e.entityType === "task" }),
+                      renderEntityRow(e, {
+                        showToggle: e.entityType === "task",
+                      }),
                     )}
                   </ul>
                 )}
@@ -689,9 +800,9 @@ function App() {
         {view === "inbox" && (
           <>
             <header className="page-header">
-              <h1>Capture</h1>
+              <h1>Get This</h1>
               <p>
-                Dump first. Organize later. <kbd>Enter</kbd> captures ·{" "}
+                Capture before it escapes. <kbd>Enter</kbd> saves ·{" "}
                 <kbd>Esc</kbd> closes detail.
               </p>
             </header>
@@ -700,7 +811,7 @@ function App() {
 
             <section className="panel">
               <div className="panel-head">
-                <h2>Entities</h2>
+                <h2>Everything in</h2>
                 <span className="muted">{inboxItems.length}</span>
               </div>
               <div className="chip-row">
@@ -709,9 +820,7 @@ function App() {
                     key={chip.value}
                     type="button"
                     className={
-                      inboxFilter === chip.value
-                        ? "chip active"
-                        : "chip"
+                      inboxFilter === chip.value ? "chip active" : "chip"
                     }
                     onClick={() => setInboxFilter(chip.value)}
                   >
@@ -737,16 +846,19 @@ function App() {
         {view === "projects" && (
           <>
             <header className="page-header">
-              <h1>Projects</h1>
-              <p>Projects are entities that contain other entities.</p>
+              <h1>Quests &amp; Side Quests</h1>
+              <p>
+                Big missions and the little ones that support them. Attach crew
+                for one-tap call / email when it gets urgent.
+              </p>
             </header>
 
             <div className="split">
               <section className="panel">
-                <h2>All projects</h2>
+                <h2>All quests</h2>
                 {projects.length === 0 ? (
                   <p className="empty">
-                    Capture a project (type Proj) from Focus or Capture.
+                    Start a quest from <strong>Get This</strong> (type Quest).
                   </p>
                 ) : (
                   <ul className="entity-list compact">
@@ -781,27 +893,210 @@ function App() {
                 <h2>
                   {selectedProjectId
                     ? projects.find((p) => p.id === selectedProjectId)?.title ??
-                      "Project"
-                    : "Select a project"}
+                      "Quest"
+                    : "Select a quest"}
                 </h2>
                 {!selectedProjectId ? (
-                  <p className="empty">Choose a project to see linked items.</p>
-                ) : projectEntities.length === 0 ? (
-                  <p className="empty">
-                    No linked items yet. Capture with a project selected, or
-                    link from the detail panel.
-                  </p>
+                  <p className="empty">Pick a quest to see work and crew.</p>
                 ) : (
-                  <ul className="entity-list">
-                    {projectEntities.map((e) =>
-                      renderEntityRow(e, {
-                        showToggle: e.entityType === "task",
-                      }),
+                  <>
+                    <h3 className="subhead">Crew — reach fast</h3>
+                    {questCrew.length === 0 ? (
+                      <p className="empty">
+                        No contacts on this quest yet. Attach one below or from
+                        Contact Center.
+                      </p>
+                    ) : (
+                      <div className="contact-grid">
+                        {questCrew.map((person) => (
+                          <ContactCard
+                            key={person.id}
+                            person={person}
+                            selected={selectedEntityId === person.id}
+                            onOpen={() => setSelectedEntityId(person.id)}
+                            busy={busy}
+                            onDetachFromQuest={() =>
+                              void detachContactFromQuest(person.id)
+                            }
+                          />
+                        ))}
+                      </div>
                     )}
-                  </ul>
+
+                    <div className="row tight attach-row">
+                      <select
+                        value={attachPersonId}
+                        onChange={(e) => setAttachPersonId(e.target.value)}
+                      >
+                        <option value="">Attach contact…</option>
+                        {people
+                          .filter(
+                            (p) => !questCrew.some((c) => c.id === p.id),
+                          )
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.title}
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        className="secondary"
+                        disabled={busy || !attachPersonId}
+                        onClick={() => void attachContactToQuest()}
+                      >
+                        Attach
+                      </button>
+                    </div>
+
+                    <h3 className="subhead">Work on this quest</h3>
+                    {questWork.length === 0 ? (
+                      <p className="empty">
+                        No notes/tasks linked. Capture with this quest
+                        selected.
+                      </p>
+                    ) : (
+                      <ul className="entity-list">
+                        {questWork.map((e) =>
+                          renderEntityRow(e, {
+                            showToggle: e.entityType === "task",
+                          }),
+                        )}
+                      </ul>
+                    )}
+                  </>
                 )}
               </section>
             </div>
+          </>
+        )}
+
+        {view === "contacts" && (
+          <>
+            <header className="page-header">
+              <h1>Contact Center</h1>
+              <p>
+                People you need on speed dial. Attach them to quests — when
+                you&apos;re in the thick of it, one click calls or emails.
+              </p>
+            </header>
+
+            <section className="panel">
+              <h2>Add contact</h2>
+              <div className="contact-form-grid">
+                <label>
+                  Name *
+                  <input
+                    value={contactName}
+                    onChange={(e) => setContactName(e.target.value)}
+                    placeholder="Who are they?"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void createContact();
+                    }}
+                  />
+                </label>
+                <label>
+                  Phone
+                  <input
+                    value={contactForm.phone}
+                    onChange={(e) =>
+                      setContactForm((c) => ({ ...c, phone: e.target.value }))
+                    }
+                    placeholder="+1 555 0100"
+                    inputMode="tel"
+                  />
+                </label>
+                <label>
+                  Email
+                  <input
+                    value={contactForm.email}
+                    onChange={(e) =>
+                      setContactForm((c) => ({ ...c, email: e.target.value }))
+                    }
+                    placeholder="name@example.com"
+                    inputMode="email"
+                  />
+                </label>
+                <label>
+                  Company
+                  <input
+                    value={contactForm.company}
+                    onChange={(e) =>
+                      setContactForm((c) => ({
+                        ...c,
+                        company: e.target.value,
+                      }))
+                    }
+                    placeholder="Org"
+                  />
+                </label>
+                <label>
+                  Role
+                  <input
+                    value={contactForm.role}
+                    onChange={(e) =>
+                      setContactForm((c) => ({ ...c, role: e.target.value }))
+                    }
+                    placeholder="How they help"
+                  />
+                </label>
+                <label>
+                  Attach to quest
+                  <select
+                    value={contactQuestId}
+                    onChange={(e) => setContactQuestId(e.target.value)}
+                  >
+                    <option value="">None yet</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <label>
+                Notes
+                <textarea
+                  value={contactNotes}
+                  onChange={(e) => setContactNotes(e.target.value)}
+                  rows={2}
+                  placeholder="Context, last talk, preference…"
+                />
+              </label>
+              <button disabled={busy} onClick={() => void createContact()}>
+                Save contact
+              </button>
+            </section>
+
+            <section className="panel">
+              <div className="panel-head">
+                <h2>Directory</h2>
+                <span className="muted">{filteredContacts.length}</span>
+              </div>
+              <input
+                className="contact-search"
+                value={contactSearch}
+                onChange={(e) => setContactSearch(e.target.value)}
+                placeholder="Filter by name, phone, email, company…"
+              />
+              {filteredContacts.length === 0 ? (
+                <p className="empty">
+                  No contacts yet. Add someone above — future-you will thank
+                  you.
+                </p>
+              ) : (
+                <div className="contact-grid">
+                  {filteredContacts.map((person) => (
+                    <ContactCard
+                      key={person.id}
+                      person={person}
+                      selected={selectedEntityId === person.id}
+                      onOpen={() => setSelectedEntityId(person.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
           </>
         )}
 
@@ -809,7 +1104,7 @@ function App() {
           <>
             <header className="page-header">
               <h1>Search</h1>
-              <p>Full-text search over titles and descriptions (FTS5).</p>
+              <p>Full-text over titles and descriptions. (Cooler name TBD.)</p>
             </header>
 
             <section className="panel">
@@ -855,9 +1150,8 @@ function App() {
             <header className="page-header">
               <h1>Backups</h1>
               <p>
-                Local snapshots of <code>workspace.db</code> in this
-                workspace&apos;s Backups folder. Auto-created on open; last 10
-                kept.
+                Local snapshots of <code>workspace.db</code>. Auto on open; last
+                10 kept. (Still looking for a cooler name.)
               </p>
             </header>
 
@@ -876,7 +1170,7 @@ function App() {
               </div>
               <p className="muted">
                 Restore replaces the live database. A safety backup is written
-                first so you can undo a bad restore.
+                first.
               </p>
             </section>
 
@@ -920,6 +1214,7 @@ function App() {
         <EntityDetail
           entityId={selectedEntityId}
           projects={projects}
+          people={people}
           onClose={() => setSelectedEntityId(null)}
           onChanged={() => void handleEntityChanged()}
           onError={(message) => setError(message)}

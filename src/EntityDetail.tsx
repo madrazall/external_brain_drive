@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
+import {
+  readContact,
+  typeLabel,
+  withContactMeta,
+  type ContactInfo,
+} from "./labels";
 import type { Entity, EntityContext, TimelineEvent } from "./types";
 
 function formatWhen(iso: string): string {
@@ -10,10 +16,6 @@ function formatWhen(iso: string): string {
   }
 }
 
-function typeBadge(type: string): string {
-  return type.charAt(0).toUpperCase() + type.slice(1);
-}
-
 function isTaskDone(entity: Entity): boolean {
   return entity.metadata?.status === "done";
 }
@@ -21,14 +23,23 @@ function isTaskDone(entity: Entity): boolean {
 interface EntityDetailProps {
   entityId: string;
   projects: Entity[];
+  people: Entity[];
   onClose: () => void;
   onChanged: (entity: Entity) => void;
   onError: (message: string) => void;
 }
 
+const emptyContact = (): ContactInfo => ({
+  phone: "",
+  email: "",
+  company: "",
+  role: "",
+});
+
 export function EntityDetail({
   entityId,
   projects,
+  people,
   onClose,
   onChanged,
   onError,
@@ -36,7 +47,10 @@ export function EntityDetail({
   const [context, setContext] = useState<EntityContext | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [contact, setContact] = useState<ContactInfo>(emptyContact());
   const [linkProjectId, setLinkProjectId] = useState("");
+  const [linkPersonId, setLinkPersonId] = useState("");
+  const [crew, setCrew] = useState<Entity[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savedFlash, setSavedFlash] = useState(false);
@@ -48,6 +62,17 @@ export function EntityDetail({
       setContext(ctx);
       setTitle(ctx.entity.title);
       setDescription(ctx.entity.description);
+      if (ctx.entity.entityType === "person") {
+        setContact(readContact(ctx.entity));
+      } else {
+        setContact(emptyContact());
+      }
+      if (ctx.entity.entityType === "project") {
+        const members = await api.projectListEntities(id);
+        setCrew(members.filter((m) => m.entityType === "person"));
+      } else {
+        setCrew([]);
+      }
     } catch (e) {
       onError(String(e));
     } finally {
@@ -62,17 +87,25 @@ export function EntityDetail({
 
   const dirty = useMemo(() => {
     if (!context) return false;
-    return (
+    const baseDirty =
       title.trim() !== context.entity.title ||
-      description !== context.entity.description
+      description !== context.entity.description;
+    if (context.entity.entityType !== "person") return baseDirty;
+    const original = readContact(context.entity);
+    return (
+      baseDirty ||
+      contact.phone !== original.phone ||
+      contact.email !== original.email ||
+      contact.company !== original.company ||
+      contact.role !== original.role
     );
-  }, [context, title, description]);
+  }, [context, title, description, contact]);
 
   const entity = context?.entity;
 
   const save = async () => {
     if (!entity || !title.trim()) {
-      onError("Title is required.");
+      onError("Name / title is required.");
       return;
     }
     setBusy(true);
@@ -81,6 +114,10 @@ export function EntityDetail({
         id: entity.id,
         title: title.trim(),
         description,
+        metadata:
+          entity.entityType === "person"
+            ? withContactMeta(entity.metadata, contact)
+            : entity.metadata,
       });
       onChanged(updated);
       await load(entity.id);
@@ -106,7 +143,7 @@ export function EntityDetail({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityId, title, description, dirty]);
+  }, [entityId, title, description, contact, dirty]);
 
   const setArchived = async (archived: boolean) => {
     if (!entity) return;
@@ -117,6 +154,10 @@ export function EntityDetail({
           id: entity.id,
           title: title.trim() || entity.title,
           description,
+          metadata:
+            entity.entityType === "person"
+              ? withContactMeta(entity.metadata, contact)
+              : undefined,
         });
       }
       const updated = await api.entityUpdate({ id: entity.id, archived });
@@ -180,8 +221,39 @@ export function EntityDetail({
     }
   };
 
+  const attachPersonToQuest = async () => {
+    if (!entity || entity.entityType !== "project" || !linkPersonId) return;
+    setBusy(true);
+    try {
+      await api.entityLink(entity.id, linkPersonId, "contains");
+      setLinkPersonId("");
+      onChanged(entity);
+      await load(entity.id);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const detachPerson = async (personId: string) => {
+    if (!entity) return;
+    setBusy(true);
+    try {
+      await api.entityUnlink(entity.id, personId, "contains");
+      onChanged(entity);
+      await load(entity.id);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const linkedIds = new Set(context?.containingProjects.map((p) => p.id) ?? []);
   const availableProjects = projects.filter((p) => !linkedIds.has(p.id));
+  const crewIds = new Set(crew.map((c) => c.id));
+  const availablePeople = people.filter((p) => !crewIds.has(p.id));
 
   return (
     <aside className="detail-panel" aria-label="Entity detail">
@@ -189,7 +261,7 @@ export function EntityDetail({
         <div>
           {entity && (
             <span className={`badge type-${entity.entityType}`}>
-              {typeBadge(entity.entityType)}
+              {typeLabel(entity.entityType)}
             </span>
           )}
           <h2>Details</h2>
@@ -204,7 +276,7 @@ export function EntityDetail({
       ) : (
         <>
           <label>
-            Title
+            {entity.entityType === "person" ? "Name" : "Title"}
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -216,13 +288,79 @@ export function EntityDetail({
             />
           </label>
 
+          {entity.entityType === "person" && (
+            <section className="detail-section contact-fields">
+              <h3>Reach them</h3>
+              <label>
+                Phone
+                <input
+                  value={contact.phone}
+                  onChange={(e) =>
+                    setContact((c) => ({ ...c, phone: e.target.value }))
+                  }
+                  placeholder="+1 555 0100"
+                  inputMode="tel"
+                />
+              </label>
+              <label>
+                Email
+                <input
+                  value={contact.email}
+                  onChange={(e) =>
+                    setContact((c) => ({ ...c, email: e.target.value }))
+                  }
+                  placeholder="name@example.com"
+                  inputMode="email"
+                />
+              </label>
+              <label>
+                Company
+                <input
+                  value={contact.company}
+                  onChange={(e) =>
+                    setContact((c) => ({ ...c, company: e.target.value }))
+                  }
+                  placeholder="Org / firm"
+                />
+              </label>
+              <label>
+                Role
+                <input
+                  value={contact.role}
+                  onChange={(e) =>
+                    setContact((c) => ({ ...c, role: e.target.value }))
+                  }
+                  placeholder="Title / how they help"
+                />
+              </label>
+              {(contact.phone || contact.email) && (
+                <div className="reach-actions">
+                  {contact.phone && (
+                    <a className="reach-btn" href={`tel:${contact.phone}`}>
+                      Call
+                    </a>
+                  )}
+                  {contact.email && (
+                    <a className="reach-btn" href={`mailto:${contact.email}`}>
+                      Email
+                    </a>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
           <label>
-            Description
+            {entity.entityType === "person" ? "Notes" : "Description"}
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              rows={8}
-              placeholder="Details, context, decisions…"
+              rows={entity.entityType === "person" ? 4 : 8}
+              placeholder={
+                entity.entityType === "person"
+                  ? "How you know them, preferences, last conversation…"
+                  : "Details, context, decisions…"
+              }
             />
           </label>
 
@@ -259,11 +397,91 @@ export function EntityDetail({
             </p>
           )}
 
+          {entity.entityType === "project" && (
+            <section className="detail-section">
+              <h3>Crew on this quest</h3>
+              {crew.length === 0 ? (
+                <p className="empty">No contacts attached yet.</p>
+              ) : (
+                <ul className="contact-mini-list">
+                  {crew.map((person) => {
+                    const c = readContact(person);
+                    return (
+                      <li key={person.id}>
+                        <div>
+                          <strong>{person.title}</strong>
+                          {(c.role || c.company) && (
+                            <small className="muted">
+                              {[c.role, c.company].filter(Boolean).join(" · ")}
+                            </small>
+                          )}
+                          <div className="reach-actions compact">
+                            {c.phone && (
+                              <a className="reach-btn" href={`tel:${c.phone}`}>
+                                Call
+                              </a>
+                            )}
+                            {c.email && (
+                              <a
+                                className="reach-btn"
+                                href={`mailto:${c.email}`}
+                              >
+                                Email
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              className="linkish"
+                              onClick={() => {
+                                /* open this person in detail by bubbling via onChanged pattern — parent owns selection */
+                              }}
+                              style={{ display: "none" }}
+                            />
+                          </div>
+                        </div>
+                        <button
+                          className="linkish"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void detachPerson(person.id)}
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {availablePeople.length > 0 && (
+                <div className="row tight">
+                  <select
+                    value={linkPersonId}
+                    onChange={(e) => setLinkPersonId(e.target.value)}
+                  >
+                    <option value="">Attach contact…</option>
+                    {availablePeople.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="secondary"
+                    disabled={busy || !linkPersonId}
+                    onClick={() => void attachPersonToQuest()}
+                  >
+                    Attach
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+
           {entity.entityType !== "project" && (
             <section className="detail-section">
-              <h3>Projects</h3>
+              <h3>Quests</h3>
               {context?.containingProjects.length === 0 ? (
-                <p className="empty">Not linked to any project.</p>
+                <p className="empty">Not linked to any quest.</p>
               ) : (
                 <ul className="chip-list">
                   {context?.containingProjects.map((p) => (
@@ -287,7 +505,7 @@ export function EntityDetail({
                     value={linkProjectId}
                     onChange={(e) => setLinkProjectId(e.target.value)}
                   >
-                    <option value="">Link to project…</option>
+                    <option value="">Link to quest…</option>
                     {availableProjects.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.title}
