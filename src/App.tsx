@@ -573,7 +573,7 @@ function App() {
         className="quick-input"
         value={quickNote}
         onChange={(e) => setQuickNote(e.target.value)}
-        placeholder="Quick note — type and press Enter"
+        placeholder="ENTER THOUGHT..."
         autoComplete="off"
         onKeyDown={(e) => {
           if (e.key === "Enter") {
@@ -597,10 +597,10 @@ function App() {
     return (
       <div className="shell welcome">
         <div className="welcome-card">
-          <p className="eyebrow">External Brain Drive</p>
-          <h1>Your notes, tasks, and people — local</h1>
+          <p className="eyebrow">BRAIN_DRIVE_</p>
+          <h1>Local notes, tasks, people</h1>
           <p className="lede">
-            Dump thoughts fast. Sort later. Everything stays on your computer.
+            Dump thoughts fast. Sort later. Everything stays on your machine.
           </p>
           {error && <div className="banner error">{error}</div>}
           <section className="panel">
@@ -656,8 +656,8 @@ function App() {
     <div className={selectedEntityId ? "shell app with-detail" : "shell app"}>
       <aside className="sidebar">
         <div className="brand">
-          <strong>External Brain Drive</strong>
-          <span>{workspace.name}</span>
+          <strong>BRAIN_DRIVE_</strong>
+          <span>{workspace.name || "system active"}</span>
         </div>
         <nav>
           <button
