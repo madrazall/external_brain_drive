@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { api } from "./api";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { api } from "./api";
 import {
   ALL_TYPES,
   readContact,
@@ -8,7 +8,13 @@ import {
   withContactMeta,
   type ContactInfo,
 } from "./labels";
-import type { Entity, EntityContext, EntityType, TimelineEvent } from "./types";
+import type {
+  DocumentInfo,
+  Entity,
+  EntityContext,
+  EntityType,
+  TimelineEvent,
+} from "./types";
 
 function formatWhen(iso: string): string {
   try {
@@ -52,12 +58,13 @@ export function EntityDetail({
   const [contact, setContact] = useState<ContactInfo>(emptyContact());
   const [linkProjectId, setLinkProjectId] = useState("");
   const [linkPersonId, setLinkPersonId] = useState("");
-  const [crew, setCrew] = useState<Entity[]>([]);
+  const [projectMembers, setProjectMembers] = useState<Entity[]>([]);
+  const [docInfo, setDocInfo] = useState<DocumentInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [savedFlash, setSavedFlash] = useState(false);
+  const [editing, setEditing] = useState(false);
 
-  const load = async (id: string) => {
+  const load = async (id: string, keepEditing = false) => {
     setLoading(true);
     try {
       const ctx = await api.entityContext(id);
@@ -70,11 +77,20 @@ export function EntityDetail({
         setContact(emptyContact());
       }
       if (ctx.entity.entityType === "project") {
-        const members = await api.projectListEntities(id);
-        setCrew(members.filter((m) => m.entityType === "person"));
+        setProjectMembers(await api.projectListEntities(id));
       } else {
-        setCrew([]);
+        setProjectMembers([]);
       }
+      if (ctx.entity.entityType === "document") {
+        try {
+          setDocInfo(await api.documentGet(id));
+        } catch {
+          setDocInfo(null);
+        }
+      } else {
+        setDocInfo(null);
+      }
+      if (!keepEditing) setEditing(false);
     } catch (e) {
       onError(String(e));
     } finally {
@@ -105,6 +121,35 @@ export function EntityDetail({
 
   const entity = context?.entity;
 
+  const crew = useMemo(
+    () => projectMembers.filter((m) => m.entityType === "person"),
+    [projectMembers],
+  );
+  const docs = useMemo(
+    () => projectMembers.filter((m) => m.entityType === "document"),
+    [projectMembers],
+  );
+  const tasks = useMemo(
+    () => projectMembers.filter((m) => m.entityType === "task"),
+    [projectMembers],
+  );
+  const notes = useMemo(
+    () =>
+      projectMembers.filter(
+        (m) => m.entityType === "note" || m.entityType === "inbox",
+      ),
+    [projectMembers],
+  );
+  const openTaskCount = tasks.filter((t) => !isTaskDone(t)).length;
+
+  const cancelEdit = () => {
+    if (!entity) return;
+    setTitle(entity.title);
+    setDescription(entity.description);
+    if (entity.entityType === "person") setContact(readContact(entity));
+    setEditing(false);
+  };
+
   const save = async () => {
     if (!entity || !title.trim()) {
       onError("Name / title is required.");
@@ -122,9 +167,7 @@ export function EntityDetail({
             : entity.metadata,
       });
       onChanged(updated);
-      await load(entity.id);
-      setSavedFlash(true);
-      window.setTimeout(() => setSavedFlash(false), 1200);
+      await load(entity.id, false);
     } catch (e) {
       onError(String(e));
     } finally {
@@ -135,40 +178,35 @@ export function EntityDetail({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        if (editing) {
+          e.preventDefault();
+          cancelEdit();
+        } else {
+          onClose();
+        }
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s" && editing) {
         e.preventDefault();
         if (dirty) void save();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "e" && !editing) {
+        e.preventDefault();
+        setEditing(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityId, title, description, contact, dirty]);
+  }, [entityId, editing, dirty, title, description, contact]);
 
   const setArchived = async (archived: boolean) => {
     if (!entity) return;
     setBusy(true);
     try {
-      if (dirty) {
-        await api.entityUpdate({
-          id: entity.id,
-          title: title.trim() || entity.title,
-          description,
-          metadata:
-            entity.entityType === "person"
-              ? withContactMeta(entity.metadata, contact)
-              : undefined,
-        });
-      }
       const updated = await api.entityUpdate({ id: entity.id, archived });
       onChanged(updated);
-      if (archived) {
-        onClose();
-      } else {
-        await load(entity.id);
-      }
+      if (archived) onClose();
+      else await load(entity.id);
     } catch (e) {
       onError(String(e));
     } finally {
@@ -186,7 +224,7 @@ export function EntityDetail({
         metadata: { ...entity.metadata, status: nextStatus },
       });
       onChanged(updated);
-      await load(entity.id);
+      await load(entity.id, editing);
     } catch (e) {
       onError(String(e));
     } finally {
@@ -198,7 +236,6 @@ export function EntityDetail({
     if (!entity || nextType === entity.entityType) return;
     setBusy(true);
     try {
-      // Persist any pending edits with the type change so nothing is lost.
       const updated = await api.entityUpdate({
         id: entity.id,
         title: title.trim() || entity.title,
@@ -210,7 +247,7 @@ export function EntityDetail({
             : entity.metadata,
       });
       onChanged(updated);
-      await load(entity.id);
+      await load(entity.id, true);
     } catch (e) {
       onError(String(e));
     } finally {
@@ -225,7 +262,7 @@ export function EntityDetail({
       await api.entityLink(linkProjectId, entity.id, "contains");
       setLinkProjectId("");
       onChanged(entity);
-      await load(entity.id);
+      await load(entity.id, editing);
     } catch (e) {
       onError(String(e));
     } finally {
@@ -239,7 +276,7 @@ export function EntityDetail({
     try {
       await api.entityUnlink(projectId, entity.id, "contains");
       onChanged(entity);
-      await load(entity.id);
+      await load(entity.id, editing);
     } catch (e) {
       onError(String(e));
     } finally {
@@ -247,14 +284,14 @@ export function EntityDetail({
     }
   };
 
-  const attachPersonToQuest = async () => {
+  const attachPerson = async () => {
     if (!entity || entity.entityType !== "project" || !linkPersonId) return;
     setBusy(true);
     try {
       await api.entityLink(entity.id, linkPersonId, "contains");
       setLinkPersonId("");
       onChanged(entity);
-      await load(entity.id);
+      await load(entity.id, editing);
     } catch (e) {
       onError(String(e));
     } finally {
@@ -268,11 +305,37 @@ export function EntityDetail({
     try {
       await api.entityUnlink(entity.id, personId, "contains");
       onChanged(entity);
-      await load(entity.id);
+      await load(entity.id, editing);
     } catch (e) {
       onError(String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const openDoc = async (id: string) => {
+    try {
+      const d = await api.documentGet(id);
+      if (!d.exists) {
+        onError("File missing on disk.");
+        return;
+      }
+      await openPath(d.absolutePath);
+    } catch (e) {
+      onError(String(e));
+    }
+  };
+
+  const revealDoc = async (id: string) => {
+    try {
+      const d = await api.documentGet(id);
+      if (!d.exists) {
+        onError("File missing on disk.");
+        return;
+      }
+      await revealItemInDir(d.absolutePath);
+    } catch (e) {
+      onError(String(e));
     }
   };
 
@@ -290,16 +353,28 @@ export function EntityDetail({
               {typeLabel(entity.entityType)}
             </span>
           )}
-          <h2>Details</h2>
+          <h2>{editing ? "Edit" : "Overview"}</h2>
         </div>
-        <button className="secondary small" onClick={onClose} type="button">
-          Close
-        </button>
+        <div className="detail-head-actions">
+          {!loading && entity && !editing && (
+            <button
+              className="secondary small"
+              type="button"
+              onClick={() => setEditing(true)}
+            >
+              Edit
+            </button>
+          )}
+          <button className="secondary small" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
       </div>
 
       {loading || !entity ? (
         <p className="empty">Loading…</p>
-      ) : (
+      ) : editing ? (
+        /* ───────────── EDIT MODE ───────────── */
         <>
           <label>
             Type
@@ -307,10 +382,7 @@ export function EntityDetail({
               className="type-change"
               value={entity.entityType}
               disabled={busy}
-              onChange={(e) =>
-                void changeType(e.target.value as EntityType)
-              }
-              aria-label="Change type"
+              onChange={(e) => void changeType(e.target.value as EntityType)}
             >
               {ALL_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>
@@ -325,83 +397,13 @@ export function EntityDetail({
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  void save();
-                }
-              }}
+              autoFocus
             />
           </label>
 
-          {entity.entityType === "document" && (
-            <section className="detail-section">
-              <h3>File</h3>
-              <p className="muted" style={{ marginBottom: "0.5rem" }}>
-                {String(entity.metadata?.fileName ?? "—")}
-                {entity.metadata?.relativePath
-                  ? ` · ${String(entity.metadata.relativePath)}`
-                  : ""}
-              </p>
-              <div className="detail-actions">
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() => {
-                    void (async () => {
-                      try {
-                        // Resolve via list path from relative metadata — open folder parent if needed
-                        const rel = String(entity.metadata?.relativePath ?? "");
-                        if (!rel) {
-                          onError("No file path on this document.");
-                          return;
-                        }
-                        // absolute path is not on entity; use project list reload via open from docs view ideally
-                        // Best-effort: try openPath with relative won't work — fetch document
-                        const { api } = await import("./api");
-                        const doc = await api.documentGet(entity.id);
-                        if (!doc.exists) {
-                          onError("File missing on disk.");
-                          return;
-                        }
-                        await openPath(doc.absolutePath);
-                      } catch (e) {
-                        onError(String(e));
-                      }
-                    })();
-                  }}
-                >
-                  Open file
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() => {
-                    void (async () => {
-                      try {
-                        const { api } = await import("./api");
-                        const doc = await api.documentGet(entity.id);
-                        if (!doc.exists) {
-                          onError("File missing on disk.");
-                          return;
-                        }
-                        await revealItemInDir(doc.absolutePath);
-                      } catch (e) {
-                        onError(String(e));
-                      }
-                    })();
-                  }}
-                >
-                  Show in folder
-                </button>
-              </div>
-            </section>
-          )}
-
           {entity.entityType === "person" && (
             <section className="detail-section contact-fields">
-              <h3>Reach them</h3>
+              <h3>Contact</h3>
               <label>
                 Phone
                 <input
@@ -409,7 +411,6 @@ export function EntityDetail({
                   onChange={(e) =>
                     setContact((c) => ({ ...c, phone: e.target.value }))
                   }
-                  placeholder="+1 555 0100"
                   inputMode="tel"
                 />
               </label>
@@ -420,7 +421,6 @@ export function EntityDetail({
                   onChange={(e) =>
                     setContact((c) => ({ ...c, email: e.target.value }))
                   }
-                  placeholder="name@example.com"
                   inputMode="email"
                 />
               </label>
@@ -431,7 +431,6 @@ export function EntityDetail({
                   onChange={(e) =>
                     setContact((c) => ({ ...c, company: e.target.value }))
                   }
-                  placeholder="Org / firm"
                 />
               </label>
               <label>
@@ -441,23 +440,8 @@ export function EntityDetail({
                   onChange={(e) =>
                     setContact((c) => ({ ...c, role: e.target.value }))
                   }
-                  placeholder="Title / how they help"
                 />
               </label>
-              {(contact.phone || contact.email) && (
-                <div className="reach-actions">
-                  {contact.phone && (
-                    <a className="reach-btn" href={`tel:${contact.phone}`}>
-                      Call
-                    </a>
-                  )}
-                  {contact.email && (
-                    <a className="reach-btn" href={`mailto:${contact.email}`}>
-                      Email
-                    </a>
-                  )}
-                </div>
-              )}
             </section>
           )}
 
@@ -466,93 +450,30 @@ export function EntityDetail({
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              rows={entity.entityType === "person" ? 4 : 8}
-              placeholder={
-                entity.entityType === "person"
-                  ? "How you know them, preferences, last conversation…"
-                  : "Details, context, decisions…"
-              }
+              rows={5}
             />
           </label>
 
-          <div className="detail-actions">
-            <button disabled={busy || !dirty} onClick={() => void save()}>
-              {savedFlash
-                ? "Saved"
-                : dirty
-                  ? "Save changes (Ctrl+S)"
-                  : "Saved"}
-            </button>
-            {entity.entityType === "task" && (
-              <button
-                className="secondary"
-                disabled={busy}
-                onClick={() => void toggleTaskDone()}
-              >
-                {isTaskDone(entity) ? "Mark open" : "Mark done"}
-              </button>
-            )}
-            <button
-              className="secondary danger"
-              disabled={busy}
-              onClick={() => void setArchived(!entity.archived)}
-            >
-              {entity.archived ? "Restore" : "Archive"}
-            </button>
-          </div>
-
-          {entity.entityType === "task" && (
-            <p className="muted">
-              Status:{" "}
-              <strong>{isTaskDone(entity) ? "Done" : "Open"}</strong>
-            </p>
-          )}
-
           {entity.entityType === "project" && (
             <section className="detail-section">
-              <h3>People on this project</h3>
+              <h3>People</h3>
               {crew.length === 0 ? (
-                <p className="empty">No one linked yet.</p>
+                <p className="empty">None linked</p>
               ) : (
                 <ul className="contact-mini-list">
-                  {crew.map((person) => {
-                    const c = readContact(person);
-                    return (
-                      <li key={person.id}>
-                        <div>
-                          <strong>{person.title}</strong>
-                          {(c.role || c.company) && (
-                            <small className="muted">
-                              {[c.role, c.company].filter(Boolean).join(" · ")}
-                            </small>
-                          )}
-                          <div className="reach-actions compact">
-                            {c.phone && (
-                              <a className="reach-btn" href={`tel:${c.phone}`}>
-                                Call
-                              </a>
-                            )}
-                            {c.email && (
-                              <a
-                                className="reach-btn"
-                                href={`mailto:${c.email}`}
-                              >
-                                Email
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                        <button
-                          className="linkish"
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void detachPerson(person.id)}
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    );
-                  })}
+                  {crew.map((person) => (
+                    <li key={person.id}>
+                      <strong>{person.title}</strong>
+                      <button
+                        className="linkish"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void detachPerson(person.id)}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
                 </ul>
               )}
               {availablePeople.length > 0 && (
@@ -571,7 +492,7 @@ export function EntityDetail({
                   <button
                     className="secondary"
                     disabled={busy || !linkPersonId}
-                    onClick={() => void attachPersonToQuest()}
+                    onClick={() => void attachPerson()}
                   >
                     Add
                   </button>
@@ -583,8 +504,8 @@ export function EntityDetail({
           {entity.entityType !== "project" && (
             <section className="detail-section">
               <h3>Projects</h3>
-              {context?.containingProjects.length === 0 ? (
-                <p className="empty">Not linked to a project.</p>
+              {(context?.containingProjects.length ?? 0) === 0 ? (
+                <p className="empty">Not linked</p>
               ) : (
                 <ul className="chip-list">
                   {context?.containingProjects.map((p) => (
@@ -627,6 +548,269 @@ export function EntityDetail({
             </section>
           )}
 
+          <div className="detail-actions">
+            <button disabled={busy || !dirty} onClick={() => void save()}>
+              Save
+            </button>
+            <button
+              className="secondary"
+              type="button"
+              disabled={busy}
+              onClick={cancelEdit}
+            >
+              Cancel
+            </button>
+            <button
+              className="secondary danger"
+              disabled={busy}
+              onClick={() => void setArchived(!entity.archived)}
+            >
+              {entity.archived ? "Restore" : "Archive"}
+            </button>
+          </div>
+        </>
+      ) : (
+        /* ───────────── VIEW MODE ───────────── */
+        <>
+          <div className="view-hero">
+            <h1 className="view-title">{entity.title}</h1>
+            {entity.entityType === "task" && (
+              <p className="view-status">
+                {isTaskDone(entity) ? "Done" : "Open"}
+              </p>
+            )}
+            {entity.entityType === "project" && (
+              <p className="view-status">
+                {openTaskCount} open · {tasks.length} tasks · {docs.length} docs
+                · {crew.length} people
+              </p>
+            )}
+          </div>
+
+          {entity.description ? (
+            <p className="view-body">{entity.description}</p>
+          ) : (
+            <p className="view-body muted">No description.</p>
+          )}
+
+          {entity.entityType === "person" && (
+            <section className="detail-section">
+              <h3>Contact</h3>
+              {(() => {
+                const c = readContact(entity);
+                return (
+                  <>
+                    <dl className="meta-grid">
+                      {c.role && (
+                        <div>
+                          <dt>Role</dt>
+                          <dd>{c.role}</dd>
+                        </div>
+                      )}
+                      {c.company && (
+                        <div>
+                          <dt>Company</dt>
+                          <dd>{c.company}</dd>
+                        </div>
+                      )}
+                      {c.phone && (
+                        <div>
+                          <dt>Phone</dt>
+                          <dd>{c.phone}</dd>
+                        </div>
+                      )}
+                      {c.email && (
+                        <div>
+                          <dt>Email</dt>
+                          <dd>{c.email}</dd>
+                        </div>
+                      )}
+                      {!c.phone && !c.email && !c.company && !c.role && (
+                        <p className="empty">No contact details yet</p>
+                      )}
+                    </dl>
+                    {(c.phone || c.email) && (
+                      <div className="reach-actions compact">
+                        {c.phone && (
+                          <a className="reach-btn primary" href={`tel:${c.phone}`}>
+                            Call
+                          </a>
+                        )}
+                        {c.email && (
+                          <a className="reach-btn" href={`mailto:${c.email}`}>
+                            Email
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </section>
+          )}
+
+          {entity.entityType === "document" && (
+            <section className="detail-section">
+              <h3>File</h3>
+              <p className="muted">
+                {docInfo?.fileName ??
+                  String(entity.metadata?.fileName ?? "—")}
+                {docInfo?.relativePath
+                  ? ` · ${docInfo.relativePath}`
+                  : entity.metadata?.relativePath
+                    ? ` · ${String(entity.metadata.relativePath)}`
+                    : ""}
+                {docInfo && !docInfo.exists ? " · missing" : ""}
+              </p>
+              <div className="detail-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy || (docInfo ? !docInfo.exists : false)}
+                  onClick={() => void openDoc(entity.id)}
+                >
+                  Open file
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy || (docInfo ? !docInfo.exists : false)}
+                  onClick={() => void revealDoc(entity.id)}
+                >
+                  Show in folder
+                </button>
+              </div>
+            </section>
+          )}
+
+          {entity.entityType === "task" && (
+            <div className="detail-actions">
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => void toggleTaskDone()}
+              >
+                {isTaskDone(entity) ? "Mark open" : "Mark done"}
+              </button>
+            </div>
+          )}
+
+          {entity.entityType === "project" && (
+            <>
+              <section className="detail-section">
+                <h3>People</h3>
+                {crew.length === 0 ? (
+                  <p className="empty">No people linked</p>
+                ) : (
+                  <ul className="contact-mini-list">
+                    {crew.map((person) => {
+                      const c = readContact(person);
+                      return (
+                        <li key={person.id}>
+                          <div>
+                            <strong>{person.title}</strong>
+                            {(c.role || c.company) && (
+                              <small className="muted">
+                                {[c.role, c.company].filter(Boolean).join(" · ")}
+                              </small>
+                            )}
+                            <div className="reach-actions compact">
+                              {c.phone && (
+                                <a
+                                  className="reach-btn primary"
+                                  href={`tel:${c.phone}`}
+                                >
+                                  Call
+                                </a>
+                              )}
+                              {c.email && (
+                                <a
+                                  className="reach-btn"
+                                  href={`mailto:${c.email}`}
+                                >
+                                  Email
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+
+              <section className="detail-section">
+                <h3>Documents</h3>
+                {docs.length === 0 ? (
+                  <p className="empty">No documents</p>
+                ) : (
+                  <ul className="view-list">
+                    {docs.map((d) => (
+                      <li key={d.id}>
+                        <span>{d.title}</span>
+                        <button
+                          type="button"
+                          className="secondary small"
+                          onClick={() => void openDoc(d.id)}
+                        >
+                          Open
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section className="detail-section">
+                <h3>Tasks</h3>
+                {tasks.length === 0 ? (
+                  <p className="empty">No tasks</p>
+                ) : (
+                  <ul className="view-list">
+                    {tasks.map((t) => (
+                      <li key={t.id}>
+                        <span className={isTaskDone(t) ? "done" : undefined}>
+                          {t.title}
+                        </span>
+                        <span className="muted">
+                          {isTaskDone(t) ? "done" : "open"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              {notes.length > 0 && (
+                <section className="detail-section">
+                  <h3>Notes</h3>
+                  <ul className="view-list">
+                    {notes.map((n) => (
+                      <li key={n.id}>
+                        <span>{n.title}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+            </>
+          )}
+
+          {entity.entityType !== "project" &&
+            (context?.containingProjects.length ?? 0) > 0 && (
+              <section className="detail-section">
+                <h3>Projects</h3>
+                <ul className="view-list">
+                  {context?.containingProjects.map((p) => (
+                    <li key={p.id}>
+                      <span>{p.title}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
           <section className="detail-section">
             <h3>Meta</h3>
             <dl className="meta-grid">
@@ -638,28 +822,22 @@ export function EntityDetail({
                 <dt>Updated</dt>
                 <dd>{formatWhen(entity.updatedAt)}</dd>
               </div>
-              <div>
-                <dt>Version</dt>
-                <dd>{entity.version}</dd>
-              </div>
             </dl>
           </section>
 
-          <section className="detail-section">
-            <h3>Timeline</h3>
-            {(context?.recentEvents.length ?? 0) === 0 ? (
-              <p className="empty">No events yet.</p>
-            ) : (
+          {(context?.recentEvents.length ?? 0) > 0 && (
+            <section className="detail-section">
+              <h3>Recent activity</h3>
               <ul className="timeline">
-                {context?.recentEvents.map((ev: TimelineEvent) => (
+                {context?.recentEvents.slice(0, 5).map((ev: TimelineEvent) => (
                   <li key={ev.id}>
                     <strong>{ev.summary}</strong>
                     <small className="muted">{formatWhen(ev.createdAt)}</small>
                   </li>
                 ))}
               </ul>
-            )}
-          </section>
+            </section>
+          )}
         </>
       )}
     </aside>

@@ -875,12 +875,79 @@ a.reach-btn.primary {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
 }
 
 .detail-head h2 {
-  margin: 0.35rem 0 0;
+  margin: 0.25rem 0 0;
+  font-size: 1rem;
+}
+
+.detail-head-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+}
+
+.view-hero {
+  margin-bottom: 0.55rem;
+}
+
+.view-title {
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 400;
+  line-height: 1.1;
+  margin: 0 0 0.25rem;
+}
+
+.view-status {
+  margin: 0;
+  color: var(--accent);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+}
+
+.view-body {
+  margin: 0 0 0.65rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: var(--text);
+}
+
+.view-body.muted {
+  color: var(--muted-2);
+  font-style: normal;
+}
+
+.view-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.view-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--border);
+  background: var(--bg-row);
+  font-size: 0.84rem;
+}
+
+.view-list .done {
+  text-decoration: line-through;
+  color: var(--muted);
 }
 
 .detail-panel label {
