@@ -147,6 +147,8 @@ function App() {
   const [attachDocId, setAttachDocId] = useState("");
   const [archivedItems, setArchivedItems] = useState<Entity[]>([]);
   const [showTaskBacklog, setShowTaskBacklog] = useState(false);
+  /** Tasks skipped via Next — go to end of queue until others are cleared. */
+  const [deferredTaskIds, setDeferredTaskIds] = useState<string[]>([]);
 
   const [contactName, setContactName] = useState("");
   const [contactForm, setContactForm] = useState<ContactInfo>(emptyContactForm());
@@ -491,8 +493,8 @@ function App() {
     }
   };
 
-  const toggleTaskDone = async (entity: Entity, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const toggleTaskDone = async (entity: Entity, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (entity.entityType !== "task") return;
     setBusy(true);
     try {
@@ -501,12 +503,22 @@ function App() {
         id: entity.id,
         metadata: { ...entity.metadata, status: next },
       });
+      setDeferredTaskIds((ids) => ids.filter((id) => id !== entity.id));
       await refreshLists();
     } catch (err) {
       setError(String(err));
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Skip this task for now — next ranked open task takes its place. */
+  const nextFocusTask = (entity: Entity, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setDeferredTaskIds((ids) => {
+      const without = ids.filter((id) => id !== entity.id);
+      return [...without, entity.id];
+    });
   };
 
   const toggleTaskPin = async (entity: Entity, e: React.MouseEvent) => {
@@ -689,18 +701,38 @@ function App() {
         entity: e,
         score: scoreOpenTask(e, badgeMap[e.id], nowMs),
       }))
-      .sort((a, b) => b.score - a.score || b.entity.updatedAt.localeCompare(a.entity.updatedAt))
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          b.entity.updatedAt.localeCompare(a.entity.updatedAt),
+      )
       .map((x) => x.entity);
   }, [entities, badgeMap]);
 
-  const focusTasks = useMemo(
-    () => openTasks.slice(0, FOCUS_TASK_LIMIT),
+  // Drop deferred ids that are no longer open tasks
+  const openTaskIdSet = useMemo(
+    () => new Set(openTasks.map((t) => t.id)),
     [openTasks],
   );
 
+  const orderedOpenTasks = useMemo(() => {
+    const deferred = deferredTaskIds.filter((id) => openTaskIdSet.has(id));
+    const deferredSet = new Set(deferred);
+    const active = openTasks.filter((t) => !deferredSet.has(t.id));
+    const skipped = deferred
+      .map((id) => openTasks.find((t) => t.id === id))
+      .filter((t): t is Entity => Boolean(t));
+    return [...active, ...skipped];
+  }, [openTasks, deferredTaskIds, openTaskIdSet]);
+
+  const focusTasks = useMemo(
+    () => orderedOpenTasks.slice(0, FOCUS_TASK_LIMIT),
+    [orderedOpenTasks],
+  );
+
   const backlogTasks = useMemo(
-    () => openTasks.slice(FOCUS_TASK_LIMIT),
-    [openTasks],
+    () => orderedOpenTasks.slice(FOCUS_TASK_LIMIT),
+    [orderedOpenTasks],
   );
 
   /** Upcoming events by date — not mixed into Focus tasks. */
@@ -784,7 +816,12 @@ function App() {
 
   const renderRow = (
     e: Entity,
-    opts?: { showToggle?: boolean; dimmed?: boolean; showPin?: boolean },
+    opts?: {
+      showToggle?: boolean;
+      dimmed?: boolean;
+      showPin?: boolean;
+      showNext?: boolean;
+    },
   ) => {
     const done = e.entityType === "task" && isTaskDone(e);
     const pinned = e.entityType === "task" && isTaskPinned(e);
@@ -793,6 +830,7 @@ function App() {
         <div
           className={[
             "entity-row-wrap",
+            opts?.showNext ? "focus-slot" : "",
             selectedEntityId === e.id ? "selected" : "",
             opts?.dimmed ? "dimmed" : "",
           ]
@@ -842,6 +880,17 @@ function App() {
               <small className="muted">{formatRelative(e.updatedAt)}</small>
             </div>
           </button>
+          {opts?.showNext && e.entityType === "task" && (
+            <button
+              type="button"
+              className="task-next"
+              disabled={busy || orderedOpenTasks.length <= 1}
+              onClick={(ev) => nextFocusTask(e, ev)}
+              title="Skip for now — show next task here"
+            >
+              Next
+            </button>
+          )}
         </div>
       </li>
     );
@@ -1157,18 +1206,22 @@ function App() {
                     <h2>Focus</h2>
                     <span className="muted">
                       {focusTasks.length}
-                      {backlogTasks.length > 0
+                      {openTasks.length > focusTasks.length
                         ? ` / ${openTasks.length}`
                         : ""}
                     </span>
                   </div>
                   <p className="focus-hint muted">
-                    Auto: recent + project-linked. ★ pins to stay on top —
-                    ignore the rest until you need them.
+                    Up to 5. Stays until Done or Next. Next skips it and pulls
+                    the next ranked task in.
                   </p>
                   <ul className="entity-list">
                     {focusTasks.map((e) =>
-                      renderRow(e, { showToggle: true, showPin: true }),
+                      renderRow(e, {
+                        showToggle: true,
+                        showPin: true,
+                        showNext: true,
+                      }),
                     )}
                   </ul>
                   {backlogTasks.length > 0 && (

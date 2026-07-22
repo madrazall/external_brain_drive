@@ -93,15 +93,16 @@ Also: **PIN** (always on top), **⋯** (switch workspace).
 - Click the title — open overview panel  
 
 ### Focus (open tasks)
-- Home only shows a small **focus** set (about 5 tasks), not your entire backlog  
+- Home shows up to **5** focus tasks  
+- Each has **Done** (checkbox), **★ pin**, and **Next**  
+- **Next** skips that task for now and pulls the next ranked task into the slot — the item stays until you Done or Next it  
 - **Automatic ranking** (no daily triage required):
-  - ★ **Pinned** always on top (star on the row or in task overview)
-  - Recently **touched** (opened / edited / status) stays hot  
-  - Linked to a **project** ranks above free-floating tasks  
-  - Brand-new tasks surface briefly, then fall if you ignore them  
-- Everything else sits under **“N more open tasks”** (dimmed when expanded)  
-- Checkbox marks done/open  
-- **Pin sparingly** — the point is a working set, not ranking everything  
+  - ★ **Pinned** always on top  
+  - Recently **touched** stays hot  
+  - Linked to a **project** ranks higher  
+  - Brand-new tasks surface briefly, then fall if ignored  
+- Everything else under **“N more open tasks”** (dimmed when expanded)  
+
 
 
 ### Recent

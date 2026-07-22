@@ -637,6 +637,36 @@ button.pin-btn:hover:not(:disabled) {
   background: transparent;
 }
 
+.entity-row-wrap.focus-slot {
+  align-items: stretch;
+}
+
+.task-next {
+  flex: 0 0 auto;
+  align-self: stretch;
+  margin: 0;
+  padding: 0 0.55rem;
+  border-radius: 0;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  min-width: 2.75rem;
+}
+
+.task-next:hover:not(:disabled) {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.task-next:disabled {
+  opacity: 0.35;
+}
+
 .entity-row-wrap.dimmed {
   opacity: 0.38;
 }
