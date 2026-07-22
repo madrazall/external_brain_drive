@@ -71,13 +71,25 @@ export function EntityDetail({
   const [description, setDescription] = useState("");
   const [contact, setContact] = useState<ContactInfo>(emptyContact());
   const [eventInfo, setEventInfo] = useState<EventInfo>(emptyEvent());
-  const [linkProjectId, setLinkProjectId] = useState("");
-  const [linkPersonId, setLinkPersonId] = useState("");
+  /** Staged project links (saved with the rest of the form). */
+  const [editProjectIds, setEditProjectIds] = useState<string[]>([]);
+  /** Staged people on a project (saved with the form). */
+  const [editPersonIds, setEditPersonIds] = useState<string[]>([]);
   const [projectMembers, setProjectMembers] = useState<Entity[]>([]);
   const [docInfo, setDocInfo] = useState<DocumentInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
+
+  const syncLinkState = (
+    ctx: EntityContext,
+    members: Entity[],
+  ) => {
+    setEditProjectIds(ctx.containingProjects.map((p) => p.id));
+    setEditPersonIds(
+      members.filter((m) => m.entityType === "person").map((m) => m.id),
+    );
+  };
 
   const load = async (id: string, keepEditing = false) => {
     setLoading(true);
@@ -96,8 +108,10 @@ export function EntityDetail({
       } else {
         setEventInfo(emptyEvent());
       }
+      let members: Entity[] = [];
       if (ctx.entity.entityType === "project") {
-        setProjectMembers(await api.projectListEntities(id));
+        members = await api.projectListEntities(id);
+        setProjectMembers(members);
       } else {
         setProjectMembers([]);
       }
@@ -110,7 +124,10 @@ export function EntityDetail({
       } else {
         setDocInfo(null);
       }
-      if (!keepEditing) setEditing(false);
+      if (!keepEditing) {
+        setEditing(false);
+        syncLinkState(ctx, members);
+      }
     } catch (e) {
       onError(String(e));
     } finally {
@@ -123,32 +140,66 @@ export function EntityDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entityId]);
 
+  const originalProjectIds = useMemo(
+    () =>
+      (context?.containingProjects.map((p) => p.id) ?? []).slice().sort(),
+    [context],
+  );
+  const originalPersonIds = useMemo(
+    () =>
+      projectMembers
+        .filter((m) => m.entityType === "person")
+        .map((m) => m.id)
+        .slice()
+        .sort(),
+    [projectMembers],
+  );
+
+  const sameIdSet = (a: string[], b: string[]) => {
+    if (a.length !== b.length) return false;
+    const sa = [...a].sort();
+    const sb = [...b].sort();
+    return sa.every((id, i) => id === sb[i]);
+  };
+
   const dirty = useMemo(() => {
     if (!context) return false;
-    const baseDirty =
+    let dirtyFields =
       title.trim() !== context.entity.title ||
       description !== context.entity.description;
     if (context.entity.entityType === "person") {
       const original = readContact(context.entity);
-      return (
-        baseDirty ||
+      dirtyFields =
+        dirtyFields ||
         contact.phone !== original.phone ||
         contact.email !== original.email ||
         contact.company !== original.company ||
-        contact.role !== original.role
-      );
+        contact.role !== original.role;
     }
     if (context.entity.entityType === "event") {
       const original = readEvent(context.entity);
-      return (
-        baseDirty ||
+      dirtyFields =
+        dirtyFields ||
         eventInfo.date !== original.date ||
         eventInfo.time !== original.time ||
-        eventInfo.location !== original.location
-      );
+        eventInfo.location !== original.location;
     }
-    return baseDirty;
-  }, [context, title, description, contact, eventInfo]);
+    const linksDirty =
+      context.entity.entityType === "project"
+        ? !sameIdSet(editPersonIds, originalPersonIds)
+        : !sameIdSet(editProjectIds, originalProjectIds);
+    return dirtyFields || linksDirty;
+  }, [
+    context,
+    title,
+    description,
+    contact,
+    eventInfo,
+    editProjectIds,
+    editPersonIds,
+    originalProjectIds,
+    originalPersonIds,
+  ]);
 
   const entity = context?.entity;
 
@@ -178,11 +229,12 @@ export function EntityDetail({
   const openTaskCount = tasks.filter((t) => !isTaskDone(t)).length;
 
   const cancelEdit = () => {
-    if (!entity) return;
+    if (!entity || !context) return;
     setTitle(entity.title);
     setDescription(entity.description);
     if (entity.entityType === "person") setContact(readContact(entity));
     if (entity.entityType === "event") setEventInfo(readEvent(entity));
+    syncLinkState(context, projectMembers);
     setEditing(false);
   };
 
@@ -195,6 +247,9 @@ export function EntityDetail({
     }
     return ent.metadata;
   };
+
+  const toggleId = (list: string[], id: string) =>
+    list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
 
   const save = async () => {
     if (!entity || !title.trim()) {
@@ -209,6 +264,35 @@ export function EntityDetail({
         description,
         metadata: buildMetadata(entity),
       });
+
+      if (entity.entityType === "project") {
+        const orig = new Set(originalPersonIds);
+        const next = new Set(editPersonIds);
+        for (const id of orig) {
+          if (!next.has(id)) {
+            await api.entityUnlink(entity.id, id, "contains");
+          }
+        }
+        for (const id of next) {
+          if (!orig.has(id)) {
+            await api.entityLink(entity.id, id, "contains");
+          }
+        }
+      } else {
+        const orig = new Set(originalProjectIds);
+        const next = new Set(editProjectIds);
+        for (const id of orig) {
+          if (!next.has(id)) {
+            await api.entityUnlink(id, entity.id, "contains");
+          }
+        }
+        for (const id of next) {
+          if (!orig.has(id)) {
+            await api.entityLink(id, entity.id, "contains");
+          }
+        }
+      }
+
       onChanged(updated);
       await load(entity.id, false);
     } catch (e) {
@@ -320,64 +404,6 @@ export function EntityDetail({
     }
   };
 
-  const linkToProject = async () => {
-    if (!entity || !linkProjectId) return;
-    setBusy(true);
-    try {
-      await api.entityLink(linkProjectId, entity.id, "contains");
-      setLinkProjectId("");
-      onChanged(entity);
-      await load(entity.id, editing);
-    } catch (e) {
-      onError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const unlinkFromProject = async (projectId: string) => {
-    if (!entity) return;
-    setBusy(true);
-    try {
-      await api.entityUnlink(projectId, entity.id, "contains");
-      onChanged(entity);
-      await load(entity.id, editing);
-    } catch (e) {
-      onError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const attachPerson = async () => {
-    if (!entity || entity.entityType !== "project" || !linkPersonId) return;
-    setBusy(true);
-    try {
-      await api.entityLink(entity.id, linkPersonId, "contains");
-      setLinkPersonId("");
-      onChanged(entity);
-      await load(entity.id, editing);
-    } catch (e) {
-      onError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const detachPerson = async (personId: string) => {
-    if (!entity) return;
-    setBusy(true);
-    try {
-      await api.entityUnlink(entity.id, personId, "contains");
-      onChanged(entity);
-      await load(entity.id, editing);
-    } catch (e) {
-      onError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const openDoc = async (id: string) => {
     try {
       const d = await api.documentGet(id);
@@ -404,11 +430,6 @@ export function EntityDetail({
     }
   };
 
-  const linkedIds = new Set(context?.containingProjects.map((p) => p.id) ?? []);
-  const availableProjects = projects.filter((p) => !linkedIds.has(p.id));
-  const crewIds = new Set(crew.map((c) => c.id));
-  const availablePeople = people.filter((p) => !crewIds.has(p.id));
-
   return (
     <aside className="detail-panel" aria-label="Entity detail">
       <div className="detail-head">
@@ -425,7 +446,10 @@ export function EntityDetail({
             <button
               className="secondary small"
               type="button"
-              onClick={() => setEditing(true)}
+              onClick={() => {
+                if (context) syncLinkState(context, projectMembers);
+                setEditing(true);
+              }}
             >
               Edit
             </button>
@@ -560,47 +584,30 @@ export function EntityDetail({
 
           {entity.entityType === "project" && (
             <section className="detail-section">
-              <h3>People</h3>
-              {crew.length === 0 ? (
-                <p className="empty">None linked</p>
+              <h3>People on this project</h3>
+              <p className="muted edit-hint">
+                Check people to include. Applied when you Save.
+              </p>
+              {people.length === 0 ? (
+                <p className="empty">No people in workspace yet</p>
               ) : (
-                <ul className="contact-mini-list">
-                  {crew.map((person) => (
-                    <li key={person.id}>
-                      <strong>{person.title}</strong>
-                      <button
-                        className="linkish"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void detachPerson(person.id)}
-                      >
-                        Remove
-                      </button>
+                <ul className="link-check-list">
+                  {people.map((p) => (
+                    <li key={p.id}>
+                      <label className="link-check">
+                        <input
+                          type="checkbox"
+                          checked={editPersonIds.includes(p.id)}
+                          disabled={busy}
+                          onChange={() =>
+                            setEditPersonIds((ids) => toggleId(ids, p.id))
+                          }
+                        />
+                        <span>{p.title}</span>
+                      </label>
                     </li>
                   ))}
                 </ul>
-              )}
-              {availablePeople.length > 0 && (
-                <div className="row tight">
-                  <select
-                    value={linkPersonId}
-                    onChange={(e) => setLinkPersonId(e.target.value)}
-                  >
-                    <option value="">Add person…</option>
-                    {availablePeople.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.title}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="secondary"
-                    disabled={busy || !linkPersonId}
-                    onClick={() => void attachPerson()}
-                  >
-                    Add
-                  </button>
-                </div>
               )}
             </section>
           )}
@@ -608,53 +615,37 @@ export function EntityDetail({
           {entity.entityType !== "project" && (
             <section className="detail-section">
               <h3>Projects</h3>
-              {(context?.containingProjects.length ?? 0) === 0 ? (
-                <p className="empty">Not linked</p>
+              <p className="muted edit-hint">
+                Check projects to link. Applied when you Save (with title and
+                other fields).
+              </p>
+              {projects.length === 0 ? (
+                <p className="empty">No projects yet</p>
               ) : (
-                <ul className="chip-list">
-                  {context?.containingProjects.map((p) => (
+                <ul className="link-check-list">
+                  {projects.map((p) => (
                     <li key={p.id}>
-                      <span>{p.title}</span>
-                      <button
-                        className="linkish"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void unlinkFromProject(p.id)}
-                      >
-                        Remove
-                      </button>
+                      <label className="link-check">
+                        <input
+                          type="checkbox"
+                          checked={editProjectIds.includes(p.id)}
+                          disabled={busy}
+                          onChange={() =>
+                            setEditProjectIds((ids) => toggleId(ids, p.id))
+                          }
+                        />
+                        <span>{p.title}</span>
+                      </label>
                     </li>
                   ))}
                 </ul>
-              )}
-              {availableProjects.length > 0 && (
-                <div className="row tight">
-                  <select
-                    value={linkProjectId}
-                    onChange={(e) => setLinkProjectId(e.target.value)}
-                  >
-                    <option value="">Link to project…</option>
-                    {availableProjects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.title}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="secondary"
-                    disabled={busy || !linkProjectId}
-                    onClick={() => void linkToProject()}
-                  >
-                    Link
-                  </button>
-                </div>
               )}
             </section>
           )}
 
           <div className="detail-actions">
             <button disabled={busy || !dirty} onClick={() => void save()}>
-              Save
+              Save all
             </button>
             <button
               className="secondary"
