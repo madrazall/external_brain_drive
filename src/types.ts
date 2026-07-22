@@ -4,7 +4,8 @@ export type EntityType =
   | "project"
   | "person"
   | "inbox"
-  | "document";
+  | "document"
+  | "event";
 
 export interface WorkspaceInfo {
   name: string;

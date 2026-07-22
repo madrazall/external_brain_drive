@@ -1174,6 +1174,16 @@ button.danger:hover:not(:disabled) {
   color: var(--note);
   border-color: rgba(94, 184, 232, 0.4);
 }
+.badge.type-event {
+  color: #e89b5e;
+  border-color: rgba(232, 155, 94, 0.4);
+}
+
+.event-when {
+  color: var(--accent) !important;
+  font-size: 0.75rem !important;
+  letter-spacing: 0.02em;
+}
 
 .muted {
   color: var(--muted);
@@ -1358,6 +1368,10 @@ button.danger:hover:not(:disabled) {
 .link-badge.kind-document {
   color: var(--note);
   border-color: rgba(94, 184, 232, 0.35);
+}
+.link-badge.kind-event {
+  color: #e89b5e;
+  border-color: rgba(232, 155, 94, 0.35);
 }
 
 .doc-list {

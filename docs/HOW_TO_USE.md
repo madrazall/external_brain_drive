@@ -39,7 +39,7 @@ Recent workspaces appear on the welcome screen.
 |------|-------------|
 | 1 | Dump anything into the top bar and press **Enter** |
 | 2 | It sits in the **Thoughts** pool (unsorted) |
-| 3 | Later: one-tap **Note / Task / Project / Person**, or open and edit |
+| 3 | Later: one-tap **Note / Task / Event / Project / Person**, or open and edit |
 | 4 | Link things to **projects**, people, and **documents** as needed |
 
 Capture is deliberately dumb and fast. Organization is optional and later.
@@ -80,7 +80,15 @@ Also: **PIN** (always on top), **⋯** (switch workspace).
 
 ### Pool
 - Unsorted thoughts  
-- **Note / Task / Project / Person** — convert with one click  
+- **Note / Task / Event / Project / Person** — convert with one click  
+- **Event** opens so you can set **date** (and optional time/location) and link a **project**  
+
+### Upcoming
+- Next events by date (not mixed into Focus tasks)  
+- Needs a date in Edit to appear here  
+- Project badge shows if linked  
+
+
 - **Dismiss** — archives without sorting  
 - Click the title — open overview panel  
 

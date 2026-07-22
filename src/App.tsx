@@ -12,6 +12,9 @@ import { api } from "./api";
 import { ContactCard } from "./ContactCard";
 import { EntityDetail } from "./EntityDetail";
 import {
+  eventSortKey,
+  formatEventWhen,
+  isEventPast,
   readContact,
   SORT_TYPES,
   typeLabel,
@@ -385,11 +388,12 @@ function App() {
       if (projectId) {
         await api.entityLink(projectId, entity.id, "contains");
       }
-      if (selectedEntityId === entity.id) {
-        // keep detail open on the same item
-      }
       await refreshLists();
       showStatus(`→ ${typeLabel(entityType)}`);
+      // Events need a date — open so user can set it + link to project
+      if (entityType === "event" || entityType === "person") {
+        setSelectedEntityId(entity.id);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -698,6 +702,14 @@ function App() {
     () => openTasks.slice(FOCUS_TASK_LIMIT),
     [openTasks],
   );
+
+  /** Upcoming events by date — not mixed into Focus tasks. */
+  const upcomingEvents = useMemo(() => {
+    return entities
+      .filter((e) => e.entityType === "event" && !isEventPast(e))
+      .sort((a, b) => eventSortKey(a) - eventSortKey(b))
+      .slice(0, 8);
+  }, [entities]);
 
   const recentItems = useMemo(
     () =>
@@ -1097,6 +1109,47 @@ function App() {
                   </ul>
                 )}
               </section>
+
+              {upcomingEvents.length > 0 && (
+                <section className="panel">
+                  <div className="panel-head">
+                    <h2>Upcoming</h2>
+                    <span className="muted">{upcomingEvents.length}</span>
+                  </div>
+                  <ul className="entity-list">
+                    {upcomingEvents.map((e) => (
+                      <li key={e.id}>
+                        <div
+                          className={
+                            selectedEntityId === e.id
+                              ? "entity-row-wrap selected"
+                              : "entity-row-wrap"
+                          }
+                        >
+                          <button
+                            type="button"
+                            className={
+                              selectedEntityId === e.id
+                                ? "entity-row selected"
+                                : "entity-row"
+                            }
+                            onClick={() => setSelectedEntityId(e.id)}
+                          >
+                            <span className="badge type-event">Event</span>
+                            <div className="entity-row-body">
+                              <strong>{e.title}</strong>
+                              <p className="event-when">
+                                {formatEventWhen(e) || "Set a date in Edit"}
+                              </p>
+                              {renderLinkBadges(e.id)}
+                            </div>
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
 
               {openTasks.length > 0 && (
                 <section className="panel">

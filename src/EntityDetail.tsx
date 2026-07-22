@@ -3,10 +3,14 @@ import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "./api";
 import {
   ALL_TYPES,
+  formatEventWhen,
   readContact,
+  readEvent,
   typeLabel,
   withContactMeta,
+  withEventMeta,
   type ContactInfo,
+  type EventInfo,
 } from "./labels";
 import type {
   DocumentInfo,
@@ -48,6 +52,12 @@ const emptyContact = (): ContactInfo => ({
   role: "",
 });
 
+const emptyEvent = (): EventInfo => ({
+  date: "",
+  time: "",
+  location: "",
+});
+
 export function EntityDetail({
   entityId,
   projects,
@@ -60,6 +70,7 @@ export function EntityDetail({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [contact, setContact] = useState<ContactInfo>(emptyContact());
+  const [eventInfo, setEventInfo] = useState<EventInfo>(emptyEvent());
   const [linkProjectId, setLinkProjectId] = useState("");
   const [linkPersonId, setLinkPersonId] = useState("");
   const [projectMembers, setProjectMembers] = useState<Entity[]>([]);
@@ -79,6 +90,11 @@ export function EntityDetail({
         setContact(readContact(ctx.entity));
       } else {
         setContact(emptyContact());
+      }
+      if (ctx.entity.entityType === "event") {
+        setEventInfo(readEvent(ctx.entity));
+      } else {
+        setEventInfo(emptyEvent());
       }
       if (ctx.entity.entityType === "project") {
         setProjectMembers(await api.projectListEntities(id));
@@ -112,16 +128,27 @@ export function EntityDetail({
     const baseDirty =
       title.trim() !== context.entity.title ||
       description !== context.entity.description;
-    if (context.entity.entityType !== "person") return baseDirty;
-    const original = readContact(context.entity);
-    return (
-      baseDirty ||
-      contact.phone !== original.phone ||
-      contact.email !== original.email ||
-      contact.company !== original.company ||
-      contact.role !== original.role
-    );
-  }, [context, title, description, contact]);
+    if (context.entity.entityType === "person") {
+      const original = readContact(context.entity);
+      return (
+        baseDirty ||
+        contact.phone !== original.phone ||
+        contact.email !== original.email ||
+        contact.company !== original.company ||
+        contact.role !== original.role
+      );
+    }
+    if (context.entity.entityType === "event") {
+      const original = readEvent(context.entity);
+      return (
+        baseDirty ||
+        eventInfo.date !== original.date ||
+        eventInfo.time !== original.time ||
+        eventInfo.location !== original.location
+      );
+    }
+    return baseDirty;
+  }, [context, title, description, contact, eventInfo]);
 
   const entity = context?.entity;
 
@@ -135,6 +162,10 @@ export function EntityDetail({
   );
   const tasks = useMemo(
     () => projectMembers.filter((m) => m.entityType === "task"),
+    [projectMembers],
+  );
+  const projectEvents = useMemo(
+    () => projectMembers.filter((m) => m.entityType === "event"),
     [projectMembers],
   );
   const notes = useMemo(
@@ -151,7 +182,18 @@ export function EntityDetail({
     setTitle(entity.title);
     setDescription(entity.description);
     if (entity.entityType === "person") setContact(readContact(entity));
+    if (entity.entityType === "event") setEventInfo(readEvent(entity));
     setEditing(false);
+  };
+
+  const buildMetadata = (ent: Entity) => {
+    if (ent.entityType === "person") {
+      return withContactMeta(ent.metadata, contact);
+    }
+    if (ent.entityType === "event") {
+      return withEventMeta(ent.metadata, eventInfo);
+    }
+    return ent.metadata;
   };
 
   const save = async () => {
@@ -165,10 +207,7 @@ export function EntityDetail({
         id: entity.id,
         title: title.trim(),
         description,
-        metadata:
-          entity.entityType === "person"
-            ? withContactMeta(entity.metadata, contact)
-            : entity.metadata,
+        metadata: buildMetadata(entity),
       });
       onChanged(updated);
       await load(entity.id, false);
@@ -201,7 +240,7 @@ export function EntityDetail({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityId, editing, dirty, title, description, contact]);
+  }, [entityId, editing, dirty, title, description, contact, eventInfo]);
 
   const setArchived = async (archived: boolean) => {
     if (!entity) return;
@@ -258,15 +297,19 @@ export function EntityDetail({
     if (!entity || nextType === entity.entityType) return;
     setBusy(true);
     try {
+      let metadata = entity.metadata;
+      if (nextType === "person" || entity.entityType === "person") {
+        metadata = withContactMeta(metadata, contact);
+      }
+      if (nextType === "event" || entity.entityType === "event") {
+        metadata = withEventMeta(metadata, eventInfo);
+      }
       const updated = await api.entityUpdate({
         id: entity.id,
         title: title.trim() || entity.title,
         description,
         entityType: nextType,
-        metadata:
-          nextType === "person" || entity.entityType === "person"
-            ? withContactMeta(entity.metadata, contact)
-            : entity.metadata,
+        metadata,
       });
       onChanged(updated);
       await load(entity.id, true);
@@ -467,6 +510,45 @@ export function EntityDetail({
             </section>
           )}
 
+          {entity.entityType === "event" && (
+            <section className="detail-section">
+              <h3>When / where</h3>
+              <label>
+                Date
+                <input
+                  type="date"
+                  value={eventInfo.date}
+                  onChange={(e) =>
+                    setEventInfo((ev) => ({ ...ev, date: e.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Time (optional)
+                <input
+                  type="time"
+                  value={eventInfo.time}
+                  onChange={(e) =>
+                    setEventInfo((ev) => ({ ...ev, time: e.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Location (optional)
+                <input
+                  value={eventInfo.location}
+                  onChange={(e) =>
+                    setEventInfo((ev) => ({
+                      ...ev,
+                      location: e.target.value,
+                    }))
+                  }
+                  placeholder="Courtroom, address…"
+                />
+              </label>
+            </section>
+          )}
+
           <label>
             {entity.entityType === "person" ? "Notes" : "Description"}
             <textarea
@@ -603,8 +685,17 @@ export function EntityDetail({
             )}
             {entity.entityType === "project" && (
               <p className="view-status">
-                {openTaskCount} open · {tasks.length} tasks · {docs.length} docs
-                · {crew.length} people
+                {openTaskCount} open · {tasks.length} tasks ·{" "}
+                {projectEvents.length} events · {docs.length} docs ·{" "}
+                {crew.length} people
+              </p>
+            )}
+            {entity.entityType === "event" && (
+              <p className="view-status">
+                {formatEventWhen(entity) || "No date set"}
+                {readEvent(entity).location
+                  ? ` · ${readEvent(entity).location}`
+                  : ""}
               </p>
             )}
           </div>
@@ -613,6 +704,12 @@ export function EntityDetail({
             <p className="view-body">{entity.description}</p>
           ) : (
             <p className="view-body muted">No description.</p>
+          )}
+
+          {entity.entityType === "event" && !formatEventWhen(entity) && (
+            <p className="muted" style={{ marginBottom: "0.5rem" }}>
+              Set a date in Edit so this shows under Upcoming on Home.
+            </p>
           )}
 
           {entity.entityType === "person" && (
@@ -804,6 +901,24 @@ export function EntityDetail({
                         </span>
                         <span className="muted">
                           {isTaskDone(t) ? "done" : "open"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section className="detail-section">
+                <h3>Events</h3>
+                {projectEvents.length === 0 ? (
+                  <p className="empty">No events</p>
+                ) : (
+                  <ul className="view-list">
+                    {projectEvents.map((ev) => (
+                      <li key={ev.id}>
+                        <span>{ev.title}</span>
+                        <span className="muted">
+                          {formatEventWhen(ev) || "no date"}
                         </span>
                       </li>
                     ))}

@@ -59,7 +59,8 @@
 | Workspace create/open | ✅ | Folder = source of truth |
 | Quick capture (Enter) | ✅ | Creates `inbox` / thought |
 | Thought pool + sort | ✅ | Home screen |
-| Notes / tasks / projects / people | ✅ | Entity types |
+| Notes / tasks / events / projects / people | ✅ | Events have date/time/location; attach to projects |
+| Upcoming strip on Home | ✅ | Sorted by event date |
 | Change type later | ✅ | Detail → Edit → Type |
 | Project overview | ✅ | People, docs, tasks, counts |
 | Edit mode | ✅ | Edit / Save / Cancel |
