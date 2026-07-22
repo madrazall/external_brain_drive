@@ -172,9 +172,11 @@ YourWorkspace/Documents/
 
 ### Import
 1. **Docs → Import file** (or import from a project)  
-2. File is **copied** into `Documents/`  
-3. App stores a document entity + relative path  
-4. Optionally linked to a project at import time  
+2. Select **one or many** files (multi-select in the picker)  
+3. Each file is **copied** into `Documents/`  
+4. App stores a document entity + relative path per file  
+5. Optionally linked to a project at import time (applies to all files in that batch)  
+
 
 ### Use
 - **Open** — system default app  

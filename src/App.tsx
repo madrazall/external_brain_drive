@@ -560,22 +560,51 @@ function App() {
     setBusy(true);
     try {
       const picked = await open({
-        multiple: false,
+        multiple: true,
         directory: false,
-        title: "Import document into workspace",
+        title: "Import documents into workspace",
       });
-      if (!picked || Array.isArray(picked)) {
+      if (!picked) {
+        setBusy(false);
+        return;
+      }
+      const paths = Array.isArray(picked) ? picked : [picked];
+      if (paths.length === 0) {
         setBusy(false);
         return;
       }
       const projectId = forProjectId || docProjectId || undefined;
-      const doc = await api.documentImport(picked, projectId);
+      let lastId: string | null = null;
+      let ok = 0;
+      const failures: string[] = [];
+      for (const path of paths) {
+        try {
+          const doc = await api.documentImport(path, projectId);
+          lastId = doc.id;
+          ok += 1;
+        } catch (err) {
+          failures.push(`${path}: ${String(err)}`);
+        }
+      }
       await refreshLists();
       if (selectedProjectId) {
         setProjectEntities(await api.projectListEntities(selectedProjectId));
       }
-      setSelectedEntityId(doc.id);
-      showStatus(`Imported: ${doc.fileName}`);
+      if (lastId && ok === 1) setSelectedEntityId(lastId);
+      if (ok > 0) {
+        showStatus(
+          ok === 1
+            ? "Imported 1 document"
+            : `Imported ${ok} documents`,
+        );
+      }
+      if (failures.length > 0) {
+        setError(
+          failures.length === 1
+            ? failures[0]
+            : `${failures.length} failed to import`,
+        );
+      }
     } catch (e) {
       setError(String(e));
     } finally {
