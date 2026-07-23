@@ -442,6 +442,38 @@ button.pin-btn:hover:not(:disabled) {
   z-index: 2;
 }
 
+.capture-mode {
+  display: flex;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+  border-right: none;
+  background: var(--bg-elevated);
+}
+
+button.mode-btn {
+  margin: 0;
+  padding: 0 0.45rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+  min-width: 2.6rem;
+}
+
+button.mode-btn.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+button.mode-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
 .quick-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -1533,6 +1565,73 @@ button.danger:hover:not(:disabled) {
 .archived-row > .secondary {
   align-self: flex-end;
   margin: 0 0.4rem 0.15rem;
+}
+
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  margin-bottom: 0.55rem;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  background: var(--bg-row);
+}
+
+.bulk-bar select {
+  flex: 1 1 8rem;
+  min-width: 0;
+  width: auto;
+  font-size: 0.75rem;
+}
+
+.note-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.note-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  border: 1px solid var(--border);
+  background: var(--bg-row);
+  padding: 0.3rem 0.35rem;
+}
+
+.note-row.selected {
+  border-color: var(--accent);
+}
+
+.note-row input[type="checkbox"] {
+  width: auto;
+  margin: 0.35rem 0 0;
+  accent-color: var(--accent);
+}
+
+.note-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 0.15rem 0.2rem;
+  color: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+.note-row-main strong {
+  font-weight: 600;
 }
 
 .thought-list {

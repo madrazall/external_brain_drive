@@ -57,8 +57,11 @@
 | Area | Status | Notes |
 |------|--------|--------|
 | Workspace create/open | ✅ | Folder = source of truth |
-| Quick capture (Enter) | ✅ | Creates `inbox` / thought |
+| Quick capture (Enter) | ✅ | Dump → thought; Note → note |
+| Capture mode toggle | ✅ | Dump \| Note on top bar |
 | Thought pool + sort | ✅ | Home screen |
+| Notes tab + bulk file | ✅ | Unfiled filter; attach to project/task/person |
+| Notes on task/person overview | ✅ | Via `contains` links |
 | Notes / tasks / events / projects / people | ✅ | Events have date/time/location; attach to projects |
 | Upcoming strip on Home | ✅ | Sorted by event date |
 | Change type later | ✅ | Detail → Edit → Type |

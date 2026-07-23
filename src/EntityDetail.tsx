@@ -109,7 +109,12 @@ export function EntityDetail({
         setEventInfo(emptyEvent());
       }
       let members: Entity[] = [];
-      if (ctx.entity.entityType === "project") {
+      if (
+        ctx.entity.entityType === "project" ||
+        ctx.entity.entityType === "task" ||
+        ctx.entity.entityType === "person"
+      ) {
+        // Reuse contains-children listing for any parent type
         members = await api.projectListEntities(id);
         setProjectMembers(members);
       } else {
@@ -810,6 +815,26 @@ export function EntityDetail({
                 {isTaskPinned(entity) ? "Unpin from focus" : "Pin to focus"}
               </button>
             </div>
+          )}
+
+          {(entity.entityType === "task" || entity.entityType === "person") && (
+            <section className="detail-section">
+              <h3>Notes</h3>
+              {notes.length === 0 ? (
+                <p className="empty">No notes linked</p>
+              ) : (
+                <ul className="view-list">
+                  {notes.map((n) => (
+                    <li key={n.id}>
+                      <span>{n.title}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="muted edit-hint">
+                File notes here from the Notes tab (bulk attach).
+              </p>
+            </section>
           )}
 
           {entity.entityType === "project" && (

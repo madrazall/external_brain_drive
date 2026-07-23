@@ -35,10 +35,13 @@ type View =
   | "home"
   | "projects"
   | "people"
+  | "notes"
   | "docs"
   | "search"
   | "archived"
   | "backups";
+
+type CaptureMode = "dump" | "note";
 
 function formatWhen(iso: string): string {
   try {
@@ -136,6 +139,10 @@ function App() {
   const [busy, setBusy] = useState(false);
 
   const [quickNote, setQuickNote] = useState("");
+  const [captureMode, setCaptureMode] = useState<CaptureMode>("dump");
+  const [noteFilter, setNoteFilter] = useState<"unfiled" | "all">("unfiled");
+  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const [bulkAttachTarget, setBulkAttachTarget] = useState("");
   const [newWorkspaceName, setNewWorkspaceName] = useState("My Brain");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Entity[]>([]);
@@ -357,8 +364,8 @@ function App() {
     }
   };
 
-  /** One line + Enter → thought pool. No type picker. No friction. */
-  const captureThought = async () => {
+  /** One line + Enter. Dump → thought pool; Note → rabbit-hole notes. */
+  const quickCapture = async () => {
     const title = quickNote.trim();
     if (!title) return;
     setError(null);
@@ -366,7 +373,7 @@ function App() {
     setQuickNote(""); // optimistic — keep field free
     try {
       await api.entityCreate({
-        entityType: "inbox",
+        entityType: captureMode === "note" ? "note" : "inbox",
         title,
       });
       await refreshLists();
@@ -701,6 +708,49 @@ function App() {
     }
   };
 
+  const toggleNoteSelected = (id: string) => {
+    setSelectedNoteIds((ids) =>
+      ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id],
+    );
+  };
+
+  const bulkAttachNotes = async (parentId: string) => {
+    if (!parentId || selectedNoteIds.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      for (const noteId of selectedNoteIds) {
+        await api.entityLink(parentId, noteId, "contains");
+      }
+      setSelectedNoteIds([]);
+      setBulkAttachTarget("");
+      await refreshLists();
+      showStatus(`Filed ${selectedNoteIds.length} note(s)`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const bulkArchiveNotes = async () => {
+    if (selectedNoteIds.length === 0) return;
+    setBusy(true);
+    try {
+      for (const id of selectedNoteIds) {
+        await api.entityUpdate({ id, archived: true });
+      }
+      const n = selectedNoteIds.length;
+      setSelectedNoteIds([]);
+      await refreshLists();
+      showStatus(`Archived ${n} note(s)`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const restoreArchived = async (entity: Entity) => {
     setBusy(true);
     setError(null);
@@ -721,6 +771,37 @@ function App() {
     () => entities.filter((e) => e.entityType === "inbox"),
     [entities],
   );
+
+  const allNotes = useMemo(
+    () => entities.filter((e) => e.entityType === "note"),
+    [entities],
+  );
+
+  /** Note has no parent contains-link (not under project/task/person). */
+  const isNoteUnfiled = useCallback(
+    (noteId: string) => {
+      const badges = badgeMap[noteId] ?? [];
+      return !badges.some((b) => b.direction === "parent");
+    },
+    [badgeMap],
+  );
+
+  const unfiledNotes = useMemo(
+    () => allNotes.filter((n) => isNoteUnfiled(n.id)),
+    [allNotes, isNoteUnfiled],
+  );
+
+  const visibleNotes = useMemo(
+    () => (noteFilter === "unfiled" ? unfiledNotes : allNotes),
+    [noteFilter, unfiledNotes, allNotes],
+  );
+
+  const openOrRecentTasks = useMemo(() => {
+    const open = entities.filter(
+      (e) => e.entityType === "task" && !isTaskDone(e),
+    );
+    return open.slice(0, 40);
+  }, [entities]);
 
   const openTasks = useMemo(() => {
     const nowMs = Date.now();
@@ -927,17 +1008,41 @@ function App() {
 
   const quickBar = (
     <div className="quick-bar">
+      <div className="capture-mode" role="group" aria-label="Capture mode">
+        <button
+          type="button"
+          className={
+            captureMode === "dump" ? "mode-btn active" : "mode-btn"
+          }
+          onClick={() => setCaptureMode("dump")}
+          title="Unsorted thought pool"
+        >
+          Dump
+        </button>
+        <button
+          type="button"
+          className={
+            captureMode === "note" ? "mode-btn active" : "mode-btn"
+          }
+          onClick={() => setCaptureMode("note")}
+          title="Rabbit-hole scratch notes"
+        >
+          Note
+        </button>
+      </div>
       <input
         ref={quickRef}
         className="quick-input"
         value={quickNote}
         onChange={(e) => setQuickNote(e.target.value)}
-        placeholder="ENTER THOUGHT..."
+        placeholder={
+          captureMode === "note" ? "SCRATCH NOTE..." : "ENTER THOUGHT..."
+        }
         autoComplete="off"
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
-            void captureThought();
+            void quickCapture();
           }
         }}
       />
@@ -945,7 +1050,7 @@ function App() {
         type="button"
         className="quick-submit"
         disabled={!quickNote.trim()}
-        onClick={() => void captureThought()}
+        onClick={() => void quickCapture()}
       >
         Add
       </button>
@@ -1048,6 +1153,16 @@ function App() {
             title="People"
           >
             People
+          </button>
+          <button
+            className={view === "notes" ? "nav active" : "nav"}
+            onClick={() => setView("notes")}
+            title="Notes"
+          >
+            Notes
+            {unfiledNotes.length > 0 && (
+              <span className="nav-count">{unfiledNotes.length}</span>
+            )}
           </button>
           <button
             className={view === "docs" ? "nav active" : "nav"}
@@ -1509,6 +1624,150 @@ function App() {
                   )}
                 </section>
               </div>
+            </>
+          )}
+
+          {view === "notes" && (
+            <>
+              <header className="page-header compact-header">
+                <h1>Notes_</h1>
+                <p>
+                  Rabbit-hole scratch. Capture with Note mode. File later in
+                  bulk.
+                </p>
+              </header>
+              <section className="panel">
+                <div className="chip-row">
+                  <button
+                    type="button"
+                    className={
+                      noteFilter === "unfiled" ? "chip active" : "chip"
+                    }
+                    onClick={() => setNoteFilter("unfiled")}
+                  >
+                    Unfiled ({unfiledNotes.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={noteFilter === "all" ? "chip active" : "chip"}
+                    onClick={() => setNoteFilter("all")}
+                  >
+                    All ({allNotes.length})
+                  </button>
+                  <button
+                    type="button"
+                    className="chip"
+                    onClick={() => {
+                      setCaptureMode("note");
+                      quickRef.current?.focus();
+                    }}
+                  >
+                    + Capture note
+                  </button>
+                </div>
+
+                {selectedNoteIds.length > 0 && (
+                  <div className="bulk-bar">
+                    <span className="muted">
+                      {selectedNoteIds.length} selected
+                    </span>
+                    <select
+                      value={bulkAttachTarget}
+                      onChange={(e) => setBulkAttachTarget(e.target.value)}
+                    >
+                      <option value="">Attach to…</option>
+                      <optgroup label="Projects">
+                        {projects.map((p) => (
+                          <option key={`p-${p.id}`} value={`project:${p.id}`}>
+                            {p.title}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Open tasks">
+                        {openOrRecentTasks.map((t) => (
+                          <option key={`t-${t.id}`} value={`task:${t.id}`}>
+                            {t.title}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="People">
+                        {people.map((p) => (
+                          <option key={`h-${p.id}`} value={`person:${p.id}`}>
+                            {p.title}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    <button
+                      type="button"
+                      className="secondary small"
+                      disabled={busy || !bulkAttachTarget}
+                      onClick={() => {
+                        const id = bulkAttachTarget.split(":")[1];
+                        if (id) void bulkAttachNotes(id);
+                      }}
+                    >
+                      Attach
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary small"
+                      disabled={busy}
+                      onClick={() => void bulkArchiveNotes()}
+                    >
+                      Archive
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary small"
+                      onClick={() => setSelectedNoteIds([])}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+
+                {visibleNotes.length === 0 ? (
+                  <p className="empty">
+                    {noteFilter === "unfiled"
+                      ? "No unfiled notes"
+                      : "No notes yet"}
+                  </p>
+                ) : (
+                  <ul className="note-list">
+                    {visibleNotes.map((n) => (
+                      <li key={n.id}>
+                        <div
+                          className={
+                            selectedEntityId === n.id
+                              ? "note-row selected"
+                              : "note-row"
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedNoteIds.includes(n.id)}
+                            onChange={() => toggleNoteSelected(n.id)}
+                            aria-label={`Select ${n.title}`}
+                          />
+                          <button
+                            type="button"
+                            className="note-row-main"
+                            onClick={() => setSelectedEntityId(n.id)}
+                          >
+                            <strong>{n.title}</strong>
+                            {renderLinkBadges(n.id)}
+                            <small className="muted">
+                              {formatRelative(n.updatedAt)}
+                              {isNoteUnfiled(n.id) ? " · unfiled" : ""}
+                            </small>
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
             </>
           )}
 

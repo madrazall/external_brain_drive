@@ -37,10 +37,10 @@ Recent workspaces appear on the welcome screen.
 
 | Step | What you do |
 |------|-------------|
-| 1 | Dump anything into the top bar and press **Enter** |
-| 2 | It sits in the **Thoughts** pool (unsorted) |
-| 3 | Later: one-tap **Note / Task / Event / Project / Person**, or open and edit |
-| 4 | Link things to **projects**, people, and **documents** as needed |
+| 1 | Dump into the top bar (**Dump** or **Note** mode) and press **Enter** |
+| 2 | **Dump** → Thoughts pool; **Note** → Notes (rabbit-hole scratch) |
+| 3 | Later: sort thoughts, or **bulk-file** notes to project / task / person |
+| 4 | Open project/task/person — notes live there |
 
 Capture is deliberately dumb and fast. Organization is optional and later.
 
@@ -49,14 +49,17 @@ Capture is deliberately dumb and fast. Organization is optional and later.
 ## Top bar (always)
 
 ```
-[ ENTER THOUGHT...                    ] [ADD]
+[ Dump | Note ]  [  ENTER THOUGHT / SCRATCH...  ] [ADD]
 ```
+
+| Mode | Creates | Use when |
+|------|---------|----------|
+| **Dump** | Thought (unsorted pool) | “I don’t know what this is yet” |
+| **Note** | Note | Rabbit-hole jots you’ll file later |
 
 - Type a line → **Enter** or **Add**  
 - Field clears immediately so you can dump several in a row  
-- In the app, press **`/`** to focus the capture field (when not typing in another field)
-
-Everything from this bar becomes a **Thought** (unsorted).
+- Press **`/`** to focus capture (when not in another field)
 
 ---
 
@@ -64,9 +67,10 @@ Everything from this bar becomes a **Thought** (unsorted).
 
 | Tab | Meaning |
 |-----|---------|
-| **Home** | Thought pool, open tasks, recent items |
+| **Home** | Thought pool, upcoming, focus tasks, recent |
 | **Proj** | Projects and what’s linked to them |
 | **People** | Contacts (phone, email, etc.) |
+| **Notes** | Scratch notes; unfiled + bulk attach |
 | **Docs** | Files in the workspace Documents folder |
 | **Find** | Full-text search |
 | **Arch** | Archived (hidden) items — restore here |
@@ -147,6 +151,20 @@ If you made a Task that should be a Project: **Edit → Type → Project**.
 ### Archive
 **Edit → Archive** (or archive from edit actions).  
 Item disappears from normal lists → find it under **Arch**.
+
+---
+
+## Notes (rabbit hole)
+
+Replace the 47 Notepad tabs:
+
+1. Flip capture to **Note**  
+2. Enter lines as you go (`check statute`, `opposing said X`, …)  
+3. Open **Notes** tab later  
+4. Filter **Unfiled** → multi-select → **Attach to…** project / open task / person  
+5. Notes then show on that project, task, or person overview  
+
+**All** shows every note including already filed ones.
 
 ---
 
